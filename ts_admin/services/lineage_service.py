@@ -173,7 +173,9 @@ async def build_object_graph(*, cluster_id: str, org_id: int, job_id: str, final
 
     Connection→table and model→liveboard edges are NOT produced here — the
     dependency API does not reliably surface a liveboard's model links (they live
-    in embedded-answer FQNs). Those arrive in Phase 2's TML pass.
+    in embedded-answer FQNs). Those arrive in Phase 2's TML pass; the only
+    liveboard edges written here are the dependency-API fallback for liveboards
+    with none on record (see `_liveboard_fallback_edges`).
 
     `finalize=True` marks the job COMPLETE. The dependencies sync handler passes
     `finalize=False` when a Phase 2 column pass follows, so the graph is queryable
@@ -233,6 +235,18 @@ async def build_object_graph(*, cluster_id: str, org_id: int, job_id: str, final
         ) as client:
             dependents = await _sweep_dependents(client, table_guids, job_id)
         edges = _edges_from_dependents(dependents, meta_by_guid, cluster_id, org_id)
+        with get_session() as session:
+            lbs_with_edges = set(
+                session.exec(
+                    select(CachedDependency.source_guid).where(
+                        CachedDependency.cluster_id == cluster_id,
+                        CachedDependency.org_id == org_id,
+                        CachedDependency.relation == "USES",
+                        CachedDependency.source_type == "LIVEBOARD",
+                    )
+                ).all()
+            )
+        edges += _liveboard_fallback_edges(dependents, meta_by_guid, edges, cluster_id, org_id, skip=lbs_with_edges)
 
     # 2. Delete-before-insert, scoped to the edge tier THIS phase rebuilds.
     # LIVEBOARD USES edges and CONNECTS edges belong to Phase 2 (TML): the
@@ -362,6 +376,67 @@ def _edges_from_dependents(
                     source_name=d_name,
                     target_guid=producer_guid,
                     target_type=p_node_type,
+                    target_name=p_name,
+                    relation="USES",
+                )
+            )
+    return edges
+
+
+def _liveboard_fallback_edges(
+    dependents: dict[str, list[dict]],
+    meta_by_guid: dict[str, tuple[str, str]],
+    object_edges: list[CachedDependency],
+    cluster_id: str,
+    org_id: int,
+    *,
+    skip: set[str],
+) -> list[CachedDependency]:
+    """
+    Dependency-API USES edges for liveboards that have none on record.
+
+    Liveboard edges normally come from Phase 2's TML pass, but ThoughtSpot
+    refuses to export some liveboards (e.g. "FormulaId ... not present in
+    question's formula map"), and those rendered as isolated nodes. The sweep
+    still lists them as dependents, so fall back to it — reduced to direct
+    sources: the sweep flattens the closure (a liveboard on a model is also
+    listed under the model's tables), so a producer that another producer of
+    the same liveboard already USES is dropped. Phase 2 replaces these edges
+    with TML ones whenever the liveboard exports.
+    """
+    producers: dict[str, set[str]] = {}
+    for producer_guid, deps in dependents.items():
+        if producer_guid not in meta_by_guid:
+            continue
+        for dep in deps:
+            dep_guid = dep.get("id") or dep.get("identifier") or dep.get("guid") or ""
+            # Only cached liveboards: Phase 2 purges edges of any outside the
+            # metadata universe, so writing them here would just churn.
+            d_meta = meta_by_guid.get(dep_guid)
+            if not d_meta or dep_guid == producer_guid or dep_guid in skip or _node_type(d_meta[1]) != "LIVEBOARD":
+                continue
+            producers.setdefault(dep_guid, set()).add(producer_guid)
+
+    uses: dict[str, set[str]] = {}
+    for e in object_edges:
+        uses.setdefault(e.target_guid, set()).add(e.source_guid)  # producer → its consumers
+
+    edges: list[CachedDependency] = []
+    for lb_guid, prods in producers.items():
+        lb_name = meta_by_guid[lb_guid][0]
+        for producer_guid in sorted(prods):
+            if uses.get(producer_guid, set()) & (prods - {producer_guid}):
+                continue  # transitive: another of this liveboard's producers sits on it
+            p_name, p_type = meta_by_guid[producer_guid]
+            edges.append(
+                CachedDependency(
+                    cluster_id=cluster_id,
+                    org_id=org_id,
+                    source_guid=lb_guid,
+                    source_type="LIVEBOARD",
+                    source_name=lb_name,
+                    target_guid=producer_guid,
+                    target_type=_node_type(p_type),
                     target_name=p_name,
                     relation="USES",
                 )
@@ -688,17 +763,19 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
                 CachedColumnLineage.org_id == org_id,
             )
         ).first()
-        has_lb_edges = (
-            session.exec(
-                select(CachedDependency.id).where(
-                    CachedDependency.cluster_id == cluster_id,
-                    CachedDependency.org_id == org_id,
-                    CachedDependency.relation == "USES",
-                    CachedDependency.source_type == "LIVEBOARD",
-                )
-            ).first()
-            is not None
-        )
+        lb_edge_rows = session.exec(
+            select(CachedDependency.source_guid, CachedDependency.synced_at).where(
+                CachedDependency.cluster_id == cluster_id,
+                CachedDependency.org_id == org_id,
+                CachedDependency.relation == "USES",
+                CachedDependency.source_type == "LIVEBOARD",
+            )
+        ).all()
+    has_lb_edges = bool(lb_edge_rows)
+    # Edges written after the last column build are Phase 1's dependency-API
+    # fallback (see _liveboard_fallback_edges), not TML — re-export those
+    # liveboards even if unchanged, so TML replaces the fallback when it can.
+    fallback_lbs = {g for g, synced_at in lb_edge_rows if last_built and synced_at and synced_at > last_built}
 
     meta_by_guid = {r[0]: (r[1], r[2]) for r in meta_rows}
     table_guids = [r[0] for r in meta_rows if (r[2] or "").upper() in LOGICAL_TABLE_TYPES]
@@ -714,7 +791,7 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     if not has_lb_edges:
         lb_guids = list(all_lb_guids)
     else:
-        lb_guids = [guid for guid, modified_at in all_liveboards if _changed(modified_at)]
+        lb_guids = [guid for guid, modified_at in all_liveboards if _changed(modified_at) or guid in fallback_lbs]
 
     if not table_guids and not lb_guids:
         return 0
@@ -729,6 +806,7 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     lb_uses_edges: list = []
     inaccessible = 0
     failed_exports: list[str] = []  # objects the server refused to export (see _export_tml_resilient)
+    refused_lbs: list[str] = []  # liveboards exported as an ERROR stub (no edoc)
     progress = 0
 
     async with ThoughtSpotClient(
@@ -796,6 +874,10 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
                 edoc = _load_edoc(item)
                 if edoc is None:
                     inaccessible += 1
+                    # An ERROR-status stub (no edoc) is a refused export, not an
+                    # empty liveboard: keep its existing edges like a failed one.
+                    if (item.get("info") or {}).get("id"):
+                        refused_lbs.append(item["info"]["id"])
                     continue
                 guid = edoc.get("guid") or (item.get("info") or {}).get("id") or ""
                 kind, body = _classify_edoc(edoc)
@@ -841,7 +923,7 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     # A liveboard whose export failed was NOT rebuilt this round — keep it out of
     # the delete scope so its existing edges/usage survive instead of being wiped
     # by a transient server error.
-    failed_set = set(failed_exports)
+    failed_set = set(failed_exports) | set(refused_lbs)
     now = datetime.now(timezone.utc)
     counts = _persist_column_map(
         cluster_id=cluster_id,
@@ -1625,8 +1707,9 @@ def get_lineage_graph(*, cluster_id: str, org_id: int, guid: str, root_kind: str
 
 # Edge sources whose Phase 1 USES edges come from the dependency sweep and can
 # therefore carry transitive shortcuts. LIVEBOARD is deliberately absent: its
-# edges are built exclusively from TML (the authored references), so every one
-# is a genuine direct link — including liveboard→table.
+# edges come from TML (the authored references), so every one is a genuine
+# direct link — including liveboard→table. The dependency-API fallback for
+# liveboards TS won't export is reduced to direct sources when it is built.
 _REDUCIBLE_SOURCE_TYPES = frozenset({"ANSWER", "MODEL", "LOGICAL_TABLE"})
 
 
