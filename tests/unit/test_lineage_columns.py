@@ -718,6 +718,95 @@ async def test_unexportable_liveboard_keeps_its_existing_edges(monkeypatch, in_m
     assert [e.target_guid for e in lb_edges] == ["model-1"]
 
 
+class _RefusesLiveboardClient(_FakeTMLClient):
+    """TS refuses lb-1's TML with an ERROR stub (no edoc) — the real shape for a
+    liveboard with a dangling formula reference — while the dependency sweep
+    still lists it, flattened under both the model and the model's table."""
+
+    async def tml_export(self, *, object_ids, edoc_format=None):
+        out = await super().tml_export(object_ids=[g for g in object_ids if g != "lb-1"], edoc_format=edoc_format)
+        if "lb-1" in object_ids:
+            self.exported.append("lb-1")
+            out.append(
+                {
+                    "info": {
+                        "id": "lb-1",
+                        "type": "liveboard",
+                        "status": {"status_code": "ERROR", "error_message": "FormulaId not present"},
+                    },
+                    "edoc": None,
+                }
+            )
+        return out
+
+    async def search_dependents(self, *, object_ids, object_type, batch_size=100):
+        return {
+            "table-1": [
+                {"id": "model-1", "name": "Sales Model", "type": "WORKSHEET"},
+                {"id": "lb-1", "name": "Sales LB", "type": "PINBOARD_ANSWER_BOOK"},
+            ],
+            "model-1": [{"id": "lb-1", "name": "Sales LB", "type": "PINBOARD_ANSWER_BOOK"}],
+        }
+
+
+def _lb_edges(engine) -> list[tuple[str, str]]:
+    from ts_admin.models.cache.ts_dependency import CachedDependency
+
+    with Session(engine) as session:
+        rows = session.exec(
+            select(CachedDependency).where(
+                CachedDependency.source_type == "LIVEBOARD", CachedDependency.relation == "USES"
+            )
+        ).all()
+    return sorted((e.source_guid, e.target_guid) for e in rows)
+
+
+async def test_refused_liveboard_export_keeps_dependency_api_edges(monkeypatch, in_memory_db, patched_config):
+    """A liveboard TS won't export used to render with no links at all."""
+    from ts_admin.services import lineage_service
+
+    _seed(in_memory_db)
+    fake = _RefusesLiveboardClient()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: fake)
+
+    await lineage_service.build_object_graph(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job(), finalize=False)
+    await lineage_service.build_column_map(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job())
+
+    assert "lb-1" in fake.exported  # TML was tried first
+    assert _lb_edges(in_memory_db) == [("lb-1", "model-1")]  # fallback survives; lb→table reduced away
+
+
+async def test_tml_replaces_fallback_for_an_unchanged_liveboard(monkeypatch, in_memory_db, patched_config):
+    """Fresh fallback edges force a TML re-export even when modified_at says unchanged."""
+    from sqlmodel import delete as sql_delete
+
+    from ts_admin.models.cache.ts_column_usage import CachedColumnUsage
+    from ts_admin.models.cache.ts_dependency import CachedDependency
+    from ts_admin.services import lineage_service
+
+    _seed(in_memory_db, lb_modified=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    healthy = _FakeTMLClient()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: healthy)
+    await lineage_service.build_column_map(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job())
+
+    # lb-1 loses its TML edges; the next Phase 1 writes the API fallback for it.
+    with Session(in_memory_db) as session:
+        session.exec(sql_delete(CachedDependency).where(CachedDependency.source_guid == "lb-1"))
+        session.exec(sql_delete(CachedColumnUsage).where(CachedColumnUsage.consumer_guid == "lb-1"))
+        session.commit()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _RefusesLiveboardClient())
+    await lineage_service.build_object_graph(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job(), finalize=False)
+    assert _lb_edges(in_memory_db) == [("lb-1", "model-1")]
+
+    healthy.exported.clear()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: healthy)
+    await lineage_service.build_column_map(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job())
+    assert "lb-1" in healthy.exported
+    assert _lb_edges(in_memory_db) == [("lb-1", "model-1")]
+    with Session(in_memory_db) as session:  # column usage only comes from TML, never the fallback
+        assert session.exec(select(CachedColumnUsage).where(CachedColumnUsage.consumer_guid == "lb-1")).all()
+
+
 async def test_export_bisect_isolates_a_rejected_identifier(monkeypatch):
     """A 400 ("Invalid parameter values: metadata_identifiers") is a bad object, not a bad request."""
     from ts_admin.services import lineage_service

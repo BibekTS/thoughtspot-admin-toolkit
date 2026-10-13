@@ -170,15 +170,15 @@ async def test_build_object_graph_creates_uses_edges(monkeypatch, in_memory_db, 
     monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: fake)
 
     count = await lineage_service.build_object_graph(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job())
-    assert count == 2  # model→table, answer→model. lb→model is deferred to Phase 2.
+    assert count == 3  # model→table, answer→model, plus the lb→model API fallback.
 
     with Session(in_memory_db) as session:
         edges = session.exec(select(CachedDependency).where(CachedDependency.cluster_id == CLUSTER_ID)).all()
     pairs = {(e.source_guid, e.target_guid, e.relation, e.source_type, e.target_type) for e in edges}
     assert ("model-1", "table-1", "USES", "MODEL", "DB_TABLE") in pairs
     assert ("answer-1", "model-1", "USES", "ANSWER", "MODEL") in pairs
-    # Liveboard object edges are NOT produced by the dependency sweep.
-    assert not any(e.source_type == "LIVEBOARD" for e in edges)
+    # lb-1 has no TML edges on record, so the sweep's listing stands in for them.
+    assert ("lb-1", "model-1", "USES", "LIVEBOARD", "MODEL") in pairs
 
 
 def test_edges_from_dependents_types_by_group_key_and_drops_noncontent():
@@ -214,6 +214,51 @@ def test_edges_from_dependents_types_by_group_key_and_drops_noncontent():
     assert all(e.target_type == "MODEL" for e in edges)
 
 
+def test_liveboard_fallback_edges_keep_direct_sources_only():
+    """
+    The sweep flattens the closure, so a liveboard on a model is also listed
+    under the model's table. The fallback keeps lb→model and drops lb→table;
+    a liveboard that already has edges on record (TML), or that isn't in the
+    metadata cache, is left alone.
+    """
+    from ts_admin.models.cache.ts_dependency import CachedDependency
+    from ts_admin.services import lineage_service
+
+    meta_by_guid = {
+        "table-1": ("SALES", "ONE_TO_ONE_LOGICAL"),
+        "model-1": ("Sales Model", "WORKSHEET"),
+        "lb-1": ("Broken LB", "LIVEBOARD"),
+    }
+    dependents = {
+        "table-1": [
+            {"id": "model-1", "type": "WORKSHEET"},
+            {"id": "lb-1", "type": "PINBOARD_ANSWER_BOOK"},
+            {"id": "lb-api", "name": "Uncached LB", "type": "PINBOARD_ANSWER_BOOK"},
+            {"id": "lb-tml", "type": "PINBOARD_ANSWER_BOOK"},
+        ],
+        "model-1": [{"id": "lb-1", "type": "PINBOARD_ANSWER_BOOK"}, {"id": "lb-tml", "type": "PINBOARD_ANSWER_BOOK"}],
+    }
+    object_edges = [
+        CachedDependency(
+            cluster_id=CLUSTER_ID,
+            org_id=0,
+            source_guid="model-1",
+            source_type="MODEL",
+            target_guid="table-1",
+            target_type="DB_TABLE",
+            relation="USES",
+        )
+    ]
+    edges = lineage_service._liveboard_fallback_edges(
+        dependents, meta_by_guid, object_edges, CLUSTER_ID, 0, skip={"lb-tml"}
+    )
+    pairs = {(e.source_guid, e.source_name, e.target_guid, e.target_type) for e in edges}
+    assert pairs == {
+        ("lb-1", "Broken LB", "model-1", "MODEL"),  # lb-1→table-1 is a transitive shortcut
+    }  # lb-api is outside the metadata cache: Phase 2 would purge it, so it is never written
+    assert all(e.source_type == "LIVEBOARD" and e.relation == "USES" for e in edges)
+
+
 async def test_build_object_graph_writes_sync_log_and_deletes_stale(monkeypatch, in_memory_db, patched_config):
     from ts_admin.models.cache.ts_dependency import CachedDependency
     from ts_admin.models.sync_log import SyncLog
@@ -244,7 +289,7 @@ async def test_build_object_graph_writes_sync_log_and_deletes_stale(monkeypatch,
         log = session.exec(select(SyncLog).where(SyncLog.entity_type == "dependencies")).one()
     assert not any(e.source_guid == "ghost" for e in edges)  # stale edge gone
     assert log.status == "SUCCESS"
-    assert log.record_count == 2
+    assert log.record_count == 3
 
 
 async def test_build_object_graph_never_synced_metadata_raises(monkeypatch, in_memory_db, patched_config):
@@ -333,9 +378,9 @@ async def test_lineage_graph_neighborhood_and_impact(monkeypatch, in_memory_db, 
 
     graph = lineage_service.get_lineage_graph(cluster_id=CLUSTER_ID, org_id=0, guid="model-1", root_kind="model")
     node_guids = {n["guid"] for n in graph["nodes"]}
-    assert node_guids == {"model-1", "table-1", "answer-1"}  # upstream table + downstream answer
-    assert graph["consumer_totals"] == {"ANSWER": 1}
-    assert graph["impact"]["downstream_count"] == 1
+    assert node_guids == {"model-1", "table-1", "answer-1", "lb-1"}  # upstream table + downstream consumers
+    assert graph["consumer_totals"] == {"ANSWER": 1, "LIVEBOARD": 1}
+    assert graph["impact"]["downstream_count"] == 2
     assert graph["columns"] == []
     # root node carries a layer for the frontend's manual layout.
     assert graph["root"]["node_type"] == "MODEL"
@@ -358,12 +403,16 @@ async def test_consumers_pagination(monkeypatch, in_memory_db, patched_config):
     await lineage_service.build_object_graph(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job())
 
     items, total = lineage_service.get_consumers(cluster_id=CLUSTER_ID, org_id=0, guid="model-1", limit=10)
+    assert total == 2
+    items, total = lineage_service.get_consumers(
+        cluster_id=CLUSTER_ID, org_id=0, guid="model-1", consumer_type="ANSWER"
+    )
     assert total == 1
     assert items[0]["guid"] == "answer-1"
     assert items[0]["node_type"] == "ANSWER"
     # type filter that matches nothing returns empty.
     items2, total2 = lineage_service.get_consumers(
-        cluster_id=CLUSTER_ID, org_id=0, guid="model-1", consumer_type="LIVEBOARD"
+        cluster_id=CLUSTER_ID, org_id=0, guid="model-1", consumer_type="DB_TABLE"
     )
     assert total2 == 0
 
@@ -617,7 +666,7 @@ async def test_sweep_cancel_stops_the_crawl_and_writes_nothing(monkeypatch, in_m
             edges = session.exec(select(CachedDependency).where(CachedDependency.cluster_id == CLUSTER_ID)).all()
         return {(e.source_guid, e.target_guid) for e in edges}
 
-    assert _edge_pairs() == {("model-1", "table-1"), ("answer-1", "model-1")}
+    assert _edge_pairs() == {("model-1", "table-1"), ("answer-1", "model-1"), ("lb-1", "model-1")}
 
     job_id = _make_job()
 
@@ -646,7 +695,7 @@ async def test_sweep_cancel_stops_the_crawl_and_writes_nothing(monkeypatch, in_m
 
     assert {t for t in asyncio.all_tasks() if not t.done()} - before == set()
     # The committed graph is exactly what it was — nothing deleted, nothing added.
-    assert _edge_pairs() == {("model-1", "table-1"), ("answer-1", "model-1")}
+    assert _edge_pairs() == {("model-1", "table-1"), ("answer-1", "model-1"), ("lb-1", "model-1")}
 
 
 async def test_cancelled_dependencies_sync_ends_partial_not_complete(monkeypatch, in_memory_db, patched_config):
