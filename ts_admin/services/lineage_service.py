@@ -40,8 +40,10 @@ from ts_admin.services.job_service import mark_complete, mark_running, update_pr
 from ts_admin.ts_client.exceptions import (
     TSInvalidParametersError,
     TSObjectNotFoundError,
+    TSRateLimitError,
     TSResponseParseError,
     TSServerError,
+    TSSSLError,
     TSTimeoutError,
 )
 from ts_admin.ts_client.throttle import background
@@ -1375,7 +1377,9 @@ async def _index_answer(*, cluster_id: str, org_id: int, guid: str, force: bool)
 #
 # Replaces ONLY the target object's rows from a fresh export, in one transaction.
 # Every row is written with `synced_at = None` and sync_log is never touched, so
-# the global watermark and the certified answer set stay exactly as they were
+# the global watermark and the certified answer set never move UP. The lineage
+# watermark can only move DOWN (fewer stamped rows, or NULL if the last stamped
+# ones were replaced) — the safe direction: the next sync re-exports more.
 # (see the S6/S7 note above `_usage_rows_from_answer`).
 
 
@@ -1392,23 +1396,47 @@ class ResyncInFlightError(RuntimeError):
 
 
 def _model_source_guids(cluster_id: str, org_id: int, body: dict) -> list[str]:
-    """Source-table GUIDs for a model body, via the same alias map the full build resolves against."""
-    pairs = set(_model_alias_map(body).values())
-    guids = {g for _, g in pairs if g}
-    names = {n for n, g in pairs if not g}
+    """
+    Source-table GUIDs for a model body, resolved like the full build: `fqn`s from the
+    alias map, plus a case-insensitive metadata-name match for fqn-less aliases and for
+    column-id prefixes the alias map doesn't know (`_resolve_model_columns` falls back
+    to `physical_by_name` for both).
+    """
+    alias = _model_alias_map(body)
+    guids = {g for _, g in alias.values() if g}
+    names = {n.lower() for n, g in alias.values() if not g}
+    for c in body.get("worksheet_columns") or body.get("columns") or body.get("view_columns") or []:
+        prefix, sep, _ = (c.get("column_id") or "").partition("::")
+        if sep and prefix and prefix.lower() not in alias:
+            names.add(prefix.lower())
+    ordered = sorted(guids)
     if names:
         with get_session() as session:
-            guids.update(
-                session.exec(
-                    select(CachedMetadata.ts_guid).where(
-                        CachedMetadata.cluster_id == cluster_id,
-                        CachedMetadata.org_id == org_id,
-                        col(CachedMetadata.name).in_(names),
-                        col(CachedMetadata.object_type).in_(LOGICAL_TABLE_TYPES),
-                    )
-                ).all()
-            )
-    return sorted(guids)
+            matched = session.exec(
+                select(CachedMetadata.ts_guid)
+                .where(
+                    CachedMetadata.cluster_id == cluster_id,
+                    CachedMetadata.org_id == org_id,
+                    func.lower(CachedMetadata.name).in_(names),
+                    col(CachedMetadata.object_type).in_(LOGICAL_TABLE_TYPES),
+                )
+                .order_by(CachedMetadata.id)  # metadata order, like the full build's export order
+            ).all()
+        ordered += [g for g in matched if g not in guids]
+    return ordered
+
+
+# A TS failure on the export itself is an export_failed result (old rows kept), not a 500.
+# Auth / privilege errors are deliberately absent: those are whole-cluster conditions.
+_EXPORT_ERRORS = (
+    TSServerError,
+    TSTimeoutError,
+    TSResponseParseError,
+    TSObjectNotFoundError,
+    TSInvalidParametersError,
+    TSRateLimitError,
+    TSSSLError,
+)
 
 
 async def resync_object(*, cluster_id: str, org_id: int, guid: str) -> dict:
@@ -1456,13 +1484,21 @@ async def resync_object(*, cluster_id: str, org_id: int, guid: str) -> dict:
         }
 
     if node_type == "ANSWER":
-        written = await _index_answer(cluster_id=cluster_id, org_id=org_id, guid=guid, force=True)
+        try:
+            written = await _index_answer(cluster_id=cluster_id, org_id=org_id, guid=guid, force=True)
+        except _EXPORT_ERRORS as exc:
+            logger.warning("Resync of answer %s: export failed: %s", guid, exc)
+            written = None
         return _result("export_failed" if written is None else "ok", {} if written is None else {"usage": written})
 
     cluster = _get_cluster(cluster_id)
     failed: list[str] = []
     async with ThoughtSpotClient(url=cluster.url, auth=cluster.build_auth_strategy(org_id=org_id)) as client:
-        items = await _export_tml_resilient(client, [guid], failed)
+        try:
+            items = await _export_tml_resilient(client, [guid], failed)
+        except _EXPORT_ERRORS as exc:
+            logger.warning("Resync of %s: export failed: %s", guid, exc)
+            return _result("export_failed", {})
         if failed or len(items) != 1:
             return _result("export_failed", {})
 
@@ -1531,10 +1567,16 @@ async def resync_object(*, cluster_id: str, org_id: int, guid: str) -> dict:
             spec = next((b for g, b in model_specs if g == guid), None)
             if spec is None:
                 return _result("export_failed", {})
+            # ponytail: a model with any inaccessible/missing source refuses the resync (the
+            # full build would write a blank chain). Safe; relax if admins hit it often.
             sources = _model_source_guids(cluster_id, org_id, spec)
             returned: set[str] = set()
             for chunk in _chunks(sources, 50):
-                src_items = await _export_tml_resilient(client, chunk, failed)
+                try:
+                    src_items = await _export_tml_resilient(client, chunk, failed)
+                except _EXPORT_ERRORS as exc:
+                    logger.warning("Resync of %s: source export failed: %s", guid, exc)
+                    return _result("export_failed", {})
                 if failed or _index_sources(
                     src_items,
                     meta_by_guid={},

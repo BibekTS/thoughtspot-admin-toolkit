@@ -3,7 +3,9 @@ S54 — `resync_object`: replace ONE object's lineage rows without moving anythi
 
 Reuses the canned TML / fixtures of the lineage suite. The contract pinned here:
 parity with a full build, failure keeps old rows, the global watermark and the
-certified answer set never move, other objects and other scopes are untouched.
+certified answer set never move UP (resync stamps nothing; it can only lower the
+lineage watermark if it replaces the last stamped rows, which just means more
+re-export next sync), other objects and other scopes are untouched.
 """
 
 from __future__ import annotations
@@ -217,3 +219,158 @@ async def test_refused_while_dependencies_sync_in_flight(built):
     with pytest.raises(lineage_service.ResyncInFlightError):
         await lineage_service.resync_object(cluster_id=CLUSTER_ID, org_id=0, guid="lb-1")
     assert fake.exported == []
+
+
+# ── Review-board additions ───────────────────────────────────────────────────────
+
+FQNLESS_MODEL_EDOC = {
+    "guid": "model-2",
+    "worksheet": {
+        "name": "Fqnless Model",
+        # no fqn and a name whose case differs from the physical table's ("SALES")
+        "tables": [{"name": "sales"}],
+        "table_paths": [{"id": "sales_1", "table": "sales", "join_path": [{"join": []}]}],
+        "worksheet_columns": [
+            {"name": "Rev", "column_id": "sales_1::Revenue"},
+            {"name": "Reg", "column_id": "SALES::Region"},
+        ],
+    },
+}
+
+
+def _lb2_edoc():
+    import copy
+
+    from tests.unit.test_lineage_columns import LIVEBOARD_EDOC
+
+    edoc = copy.deepcopy(LIVEBOARD_EDOC)
+    edoc["guid"] = "lb-2"
+    edoc["liveboard"]["name"] = "Other LB"
+    return edoc
+
+
+class _ExtraClient(_FakeTMLClient):
+    """The canned client plus model-2 / lb-2, with hooks to raise or drop objects."""
+
+    def __init__(self):
+        super().__init__()
+        self.raises: dict[str, Exception] = {}
+        self.drop: set[str] = set()
+
+    async def tml_export(self, *, object_ids, edoc_format=None):
+        for g in object_ids:
+            if g in self.raises:
+                raise self.raises[g]
+        items = await super().tml_export(object_ids=object_ids, edoc_format=edoc_format)
+        extra = {"model-2": FQNLESS_MODEL_EDOC, "lb-2": _lb2_edoc()}
+        for g in object_ids:
+            if g in extra:
+                items.append({"info": {"id": g}, "edoc": extra[g]})
+        return [i for i in items if i["info"]["id"] not in self.drop]
+
+
+@pytest.fixture
+def built2(monkeypatch, in_memory_db, patched_config):  # noqa: F811
+    from ts_admin.models.cache.ts_metadata import CachedMetadata
+
+    _seed(in_memory_db)
+    with Session(in_memory_db) as s:
+        for guid, name, otype in (("model-2", "Fqnless Model", "WORKSHEET"), ("lb-2", "Other LB", "LIVEBOARD")):
+            s.add(
+                CachedMetadata(
+                    cluster_id=CLUSTER_ID, org_id=0, ts_guid=guid, name=name, object_type=otype, owner_name="A"
+                )
+            )
+        s.commit()
+    fake = _ExtraClient()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: fake)
+    return in_memory_db, fake
+
+
+async def _full_build(engine):
+    job_id = _make_job()
+    await lineage_service.build_column_map(cluster_id=CLUSTER_ID, org_id=0, job_id=job_id)
+    mark_complete(job_id, {})
+
+
+async def test_fqnless_case_mismatched_model_matches_full_build(built2):
+    engine, fake = built2
+    await _full_build(engine)
+    want = _lineage(engine, "model-2")
+    assert want and all(row[3] == "FACT_SALES" for row in want)  # resolved through the name fallback
+    with Session(engine) as s:
+        for r in s.exec(select(CachedColumnLineage).where(CachedColumnLineage.model_guid == "model-2")).all():
+            r.db_table = ""
+            s.add(r)
+        s.commit()
+
+    res = await lineage_service.resync_object(cluster_id=CLUSTER_ID, org_id=0, guid="model-2")
+
+    assert res["status"] == "ok"
+    assert _lineage(engine, "model-2") == want
+
+
+async def test_resync_leaves_a_sibling_liveboard_alone(built2):
+    engine, fake = built2
+    await _full_build(engine)
+    sibling = _lb_rows(engine, "lb-2")
+    assert sibling[0] and sibling[1]
+    await lineage_service.resync_object(cluster_id=CLUSTER_ID, org_id=0, guid="lb-1")
+    assert _lb_rows(engine, "lb-2") == sibling
+
+
+@pytest.mark.parametrize(
+    ("guid", "raising"),
+    [("lb-1", "lb-1"), ("model-1", "model-1"), ("model-1", "table-1"), ("answer-1", "answer-1")],
+)
+@pytest.mark.parametrize("make_exc", [lambda: _exc("TSServerError", 500, "x"), lambda: _exc("TSTimeoutError")])
+async def test_raising_export_is_export_failed_and_keeps_rows(built2, guid, raising, make_exc):
+    engine, fake = built2
+    await _full_build(engine)
+    with Session(engine) as s:
+        s.add(
+            CachedColumnUsage(
+                cluster_id=CLUSTER_ID, org_id=0, model_guid="model-1", model_column_name="Old",
+                consumer_guid="answer-1", consumer_type="ANSWER", consumer_name="a",
+            )
+        )  # fmt: skip
+        s.commit()
+    before = (_lineage(engine), _lb_rows(engine), _answer_rows(engine))
+    assert all(before)
+
+    fake.raises[raising] = make_exc()
+    res = await lineage_service.resync_object(cluster_id=CLUSTER_ID, org_id=0, guid=guid)
+
+    assert res["status"] == "export_failed"
+    assert (_lineage(engine), _lb_rows(engine), _answer_rows(engine)) == before
+
+
+async def test_rate_limit_on_any_path_is_export_failed(built2):
+    engine, fake = built2
+    await _full_build(engine)
+    before = _lb_rows(engine)
+    fake.raises["lb-1"] = _exc("TSRateLimitError")
+    res = await lineage_service.resync_object(cluster_id=CLUSTER_ID, org_id=0, guid="lb-1")
+    assert res["status"] == "export_failed" and _lb_rows(engine) == before
+
+
+async def test_source_missing_from_export_response_is_export_failed(built2):
+    engine, fake = built2
+    await _full_build(engine)
+    before = _lineage(engine)
+    assert before
+    fake.drop = {"table-1"}  # the export "succeeds" but silently omits the source table
+    res = await lineage_service.resync_object(cluster_id=CLUSTER_ID, org_id=0, guid="model-1")
+    assert res["status"] == "export_failed" and _lineage(engine) == before
+
+
+def _exc(name: str, *args):
+    from ts_admin.ts_client import exceptions
+
+    return getattr(exceptions, name)(*args)
+
+
+def _answer_rows(engine):
+    with Session(engine) as s:
+        rows = s.exec(select(CachedColumnUsage).where(CachedColumnUsage.consumer_type == "ANSWER")).all()
+    return sorted((r.model_column_name, r.consumer_guid) for r in rows)
