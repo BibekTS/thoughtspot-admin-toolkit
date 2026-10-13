@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from collections import deque
 from datetime import datetime, timezone
 
@@ -725,6 +726,130 @@ def _embedded_answers(liveboard_body: dict):
             yield answer
 
 
+def _index_sources(
+    items: list[dict],
+    *,
+    meta_by_guid: dict[str, tuple[str, str]],
+    conn_name_to_guid: dict[str, str],
+    physical_by_guid: dict[str, dict],
+    physical_by_name: dict[str, dict],
+    model_specs: list[tuple[str, dict]],
+    connect_edges: dict[str, dict],
+) -> int:
+    """
+    Step 2a body: fold exported logical-table items into the physical-source
+    indexes, the model specs, and the CONNECTS edges (all mutated in place).
+    Returns the number of inaccessible (no edoc) items.
+    """
+    inaccessible = 0
+    for item in items:
+        edoc = _load_edoc(item)
+        if edoc is None:
+            inaccessible += 1
+            continue
+        guid = edoc.get("guid") or (item.get("info") or {}).get("id") or ""
+        kind, body = _classify_edoc(edoc)
+        if kind in _SOURCE_KINDS:
+            summary = _parse_physical_source(body)
+            if guid:
+                physical_by_guid[guid] = summary
+            if body.get("name"):
+                physical_by_name[body["name"]] = summary
+                # Lowercase alias key: Model TML refers to its sources by
+                # the lowercased table name (see _model_alias_map).
+                physical_by_name.setdefault(body["name"].lower(), summary)
+            conn_guid = summary["connection_guid"] or conn_name_to_guid.get(summary["connection_name"], "")
+            if guid and summary["connection_name"]:
+                connect_edges[guid] = {
+                    "source_guid": guid,
+                    "source_type": "DB_TABLE",
+                    "source_name": meta_by_guid.get(guid, (body.get("name", ""), ""))[0],
+                    "target_guid": conn_guid or f"conn::{summary['connection_name']}",
+                    "target_type": "CONNECTION",
+                    "target_name": summary["connection_name"],
+                    "relation": "CONNECTS",
+                }
+        elif kind in _MODEL_KINDS and guid:
+            model_specs.append((guid, body))
+    return inaccessible
+
+
+def _parse_liveboard(
+    item: dict,
+    *,
+    meta_by_guid: dict[str, tuple[str, str]],
+    cluster_id: str,
+    org_id: int,
+    lb_uses_edges: list,
+    usage_rows: list,
+    refused_lbs: list[str],
+) -> str:
+    """
+    Step 2c body: parse one exported liveboard item into model→liveboard USES
+    edges + per-column usage rows (appended in place). Returns "inaccessible"
+    (no edoc; also recorded in `refused_lbs`), "skipped" (not a liveboard), or "ok".
+    """
+    from ts_admin.models.cache.ts_column_usage import CachedColumnUsage
+
+    edoc = _load_edoc(item)
+    if edoc is None:
+        # An ERROR-status stub (no edoc) is a refused export, not an
+        # empty liveboard: keep its existing edges like a failed one.
+        if (item.get("info") or {}).get("id"):
+            refused_lbs.append(item["info"]["id"])
+        return "inaccessible"
+    guid = edoc.get("guid") or (item.get("info") or {}).get("id") or ""
+    kind, body = _classify_edoc(edoc)
+    if kind != "liveboard" or not guid:
+        return "skipped"
+    lb_name = meta_by_guid.get(guid, (body.get("name", ""), ""))[0]
+    seen_models: set[str] = set()
+    for answer in _embedded_answers(body):
+        model_guids, used_cols = _extract_col_usage_from_answer(answer)
+        for model_guid in model_guids:
+            if model_guid not in seen_models:
+                seen_models.add(model_guid)
+                m_name, m_type = meta_by_guid.get(model_guid, ("", ""))
+                lb_uses_edges.append(
+                    CachedDependency(
+                        cluster_id=cluster_id,
+                        org_id=org_id,
+                        source_guid=guid,
+                        source_type="LIVEBOARD",
+                        source_name=lb_name,
+                        target_guid=model_guid,
+                        target_type=_node_type(m_type),
+                        target_name=m_name,
+                        relation="USES",
+                    )
+                )
+            for used_col in used_cols:
+                usage_rows.append(
+                    CachedColumnUsage(
+                        cluster_id=cluster_id,
+                        org_id=org_id,
+                        model_guid=model_guid,
+                        model_column_name=used_col,
+                        consumer_guid=guid,
+                        consumer_type="LIVEBOARD",
+                        consumer_name=lb_name,
+                    )
+                )
+    return "ok"
+
+
+# Serializes the lineage writers for one (cluster, org): `_persist_column_map`'s
+# delete→insert and `resync_object`'s per-object replace must not interleave.
+# A threading.Lock, not an asyncio.Lock: both persists are synchronous (nothing
+# to await while holding it), and this stays correct if one is ever moved to a
+# worker thread.
+_write_locks: dict[tuple[str, int], threading.Lock] = {}
+
+
+def _lineage_write_lock(cluster_id: str, org_id: int) -> threading.Lock:
+    return _write_locks.setdefault((cluster_id, org_id), threading.Lock())
+
+
 async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, incremental: bool = True) -> int:
     """
     Phase 2: build the 3-layer column map (LOGICAL_TABLE TML) plus the two edge
@@ -740,7 +865,6 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     `_persist_column_map`, so a half-exported pass never replaces a whole one.
     """
     from ts_admin.models.cache.ts_column_lineage import CachedColumnLineage
-    from ts_admin.models.cache.ts_column_usage import CachedColumnUsage
     from ts_admin.services.archiver_service import _get_cluster
     from ts_admin.services.job_service import is_cancelled
     from ts_admin.ts_client import ThoughtSpotClient
@@ -821,35 +945,15 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
             if is_cancelled(job_id):
                 raise SyncCancelled(f"column map cancelled after {progress} object(s)")
             items = await _export_tml_resilient(client, chunk, failed_exports)
-            for item in items:
-                edoc = _load_edoc(item)
-                if edoc is None:
-                    inaccessible += 1
-                    continue
-                guid = edoc.get("guid") or (item.get("info") or {}).get("id") or ""
-                kind, body = _classify_edoc(edoc)
-                if kind in _SOURCE_KINDS:
-                    summary = _parse_physical_source(body)
-                    if guid:
-                        physical_by_guid[guid] = summary
-                    if body.get("name"):
-                        physical_by_name[body["name"]] = summary
-                        # Lowercase alias key: Model TML refers to its sources by
-                        # the lowercased table name (see _model_alias_map).
-                        physical_by_name.setdefault(body["name"].lower(), summary)
-                    conn_guid = summary["connection_guid"] or conn_name_to_guid.get(summary["connection_name"], "")
-                    if guid and summary["connection_name"]:
-                        connect_edges[guid] = {
-                            "source_guid": guid,
-                            "source_type": "DB_TABLE",
-                            "source_name": meta_by_guid.get(guid, (body.get("name", ""), ""))[0],
-                            "target_guid": conn_guid or f"conn::{summary['connection_name']}",
-                            "target_type": "CONNECTION",
-                            "target_name": summary["connection_name"],
-                            "relation": "CONNECTS",
-                        }
-                elif kind in _MODEL_KINDS and guid:
-                    model_specs.append((guid, body))
+            inaccessible += _index_sources(
+                items,
+                meta_by_guid=meta_by_guid,
+                conn_name_to_guid=conn_name_to_guid,
+                physical_by_guid=physical_by_guid,
+                physical_by_name=physical_by_name,
+                model_specs=model_specs,
+                connect_edges=connect_edges,
+            )
             progress += len(chunk)
             update_progress(job_id, progress)
 
@@ -872,51 +976,17 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
                 raise SyncCancelled(f"column map cancelled after {progress} object(s)")
             items = await _export_tml_resilient(client, chunk, failed_exports)
             for item in items:
-                edoc = _load_edoc(item)
-                if edoc is None:
+                state = _parse_liveboard(
+                    item,
+                    meta_by_guid=meta_by_guid,
+                    cluster_id=cluster_id,
+                    org_id=org_id,
+                    lb_uses_edges=lb_uses_edges,
+                    usage_rows=usage_rows,
+                    refused_lbs=refused_lbs,
+                )
+                if state == "inaccessible":
                     inaccessible += 1
-                    # An ERROR-status stub (no edoc) is a refused export, not an
-                    # empty liveboard: keep its existing edges like a failed one.
-                    if (item.get("info") or {}).get("id"):
-                        refused_lbs.append(item["info"]["id"])
-                    continue
-                guid = edoc.get("guid") or (item.get("info") or {}).get("id") or ""
-                kind, body = _classify_edoc(edoc)
-                if kind != "liveboard" or not guid:
-                    continue
-                lb_name = meta_by_guid.get(guid, (body.get("name", ""), ""))[0]
-                seen_models: set[str] = set()
-                for answer in _embedded_answers(body):
-                    model_guids, used_cols = _extract_col_usage_from_answer(answer)
-                    for model_guid in model_guids:
-                        if model_guid not in seen_models:
-                            seen_models.add(model_guid)
-                            m_name, m_type = meta_by_guid.get(model_guid, ("", ""))
-                            lb_uses_edges.append(
-                                CachedDependency(
-                                    cluster_id=cluster_id,
-                                    org_id=org_id,
-                                    source_guid=guid,
-                                    source_type="LIVEBOARD",
-                                    source_name=lb_name,
-                                    target_guid=model_guid,
-                                    target_type=_node_type(m_type),
-                                    target_name=m_name,
-                                    relation="USES",
-                                )
-                            )
-                        for col in used_cols:
-                            usage_rows.append(
-                                CachedColumnUsage(
-                                    cluster_id=cluster_id,
-                                    org_id=org_id,
-                                    model_guid=model_guid,
-                                    model_column_name=col,
-                                    consumer_guid=guid,
-                                    consumer_type="LIVEBOARD",
-                                    consumer_name=lb_name,
-                                )
-                            )
             progress += len(chunk)
             update_progress(job_id, progress)
 
@@ -926,17 +996,18 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     # by a transient server error.
     failed_set = set(failed_exports) | set(refused_lbs)
     now = datetime.now(timezone.utc)
-    counts = _persist_column_map(
-        cluster_id=cluster_id,
-        org_id=org_id,
-        now=now,
-        lineage_rows=lineage_rows,
-        connect_edges=list(connect_edges.values()),
-        lb_guids=[g for g in lb_guids if g not in failed_set],
-        all_lb_guids=all_lb_guids,
-        lb_uses_edges=lb_uses_edges,
-        usage_rows=usage_rows,
-    )
+    with _lineage_write_lock(cluster_id, org_id):
+        counts = _persist_column_map(
+            cluster_id=cluster_id,
+            org_id=org_id,
+            now=now,
+            lineage_rows=lineage_rows,
+            connect_edges=list(connect_edges.values()),
+            lb_guids=[g for g in lb_guids if g not in failed_set],
+            all_lb_guids=all_lb_guids,
+            lb_uses_edges=lb_uses_edges,
+            usage_rows=usage_rows,
+        )
     if inaccessible:
         logger.info("Column map: %d inaccessible TML stub(s) for cluster=%s org=%s", inaccessible, cluster_id, org_id)
     if failed_exports:
@@ -1230,16 +1301,22 @@ def _usage_rows_from_answer(*, guid: str, name: str, body: dict, cluster_id: str
     return rows
 
 
-async def index_answer(*, cluster_id: str, org_id: int, guid: str) -> int:
+async def index_answer(*, cluster_id: str, org_id: int, guid: str, force: bool = False) -> int:
     """
     Lazily index one saved answer's column usage (1 TML export, memoized). Called
     when an answer is opened. Returns rows written (0 if already indexed, not an
-    answer, or inaccessible).
+    answer, or inaccessible). `force=True` skips the memo and replaces the
+    answer's existing usage rows (used by `resync_object`).
 
     Rows are written with `synced_at = None` on purpose — see the section note
     above: this is browsing, not a certified deep-index pass, and stamping it
     here silently killed the deep index.
     """
+    return await _index_answer(cluster_id=cluster_id, org_id=org_id, guid=guid, force=force) or 0
+
+
+async def _index_answer(*, cluster_id: str, org_id: int, guid: str, force: bool) -> int | None:
+    """`index_answer` body; None = the export failed / was not an answer (old rows kept)."""
     from ts_admin.models.cache.ts_column_usage import CachedColumnUsage
     from ts_admin.services.archiver_service import _get_cluster
     from ts_admin.ts_client import ThoughtSpotClient
@@ -1253,7 +1330,7 @@ async def index_answer(*, cluster_id: str, org_id: int, guid: str) -> int:
                 CachedColumnUsage.consumer_type == "ANSWER",
             )
         ).first()
-        if already is not None:
+        if already is not None and not force:
             return 0
         name_row = session.exec(
             select(CachedMetadata.name).where(
@@ -1268,21 +1345,233 @@ async def index_answer(*, cluster_id: str, org_id: int, guid: str) -> int:
         items = await client.tml_export(object_ids=[guid], edoc_format="JSON")
     edoc = _load_edoc(items[0]) if items else None
     if edoc is None:
-        return 0
+        return None
     kind, body = _classify_edoc(edoc)
     if kind != "answer":
-        return 0
+        return None
 
     rows = _usage_rows_from_answer(guid=guid, name=name_row or "", body=body, cluster_id=cluster_id, org_id=org_id)
-    if not rows:
+    if not rows and not force:
         return 0
     with get_session() as session:
+        if force:
+            session.exec(
+                sql_delete(CachedColumnUsage).where(
+                    CachedColumnUsage.cluster_id == cluster_id,
+                    CachedColumnUsage.org_id == org_id,
+                    CachedColumnUsage.consumer_guid == guid,
+                    CachedColumnUsage.consumer_type == "ANSWER",
+                )
+            )
         for row in rows:
             # NOT stamped: `synced_at` certifies a deep-index pass (section note).
             row.synced_at = None
             session.add(row)
         session.commit()
     return len(rows)
+
+
+# ── RESYNC: one object's lineage (S54) ───────────────────────────────────────────
+#
+# Replaces ONLY the target object's rows from a fresh export, in one transaction.
+# Every row is written with `synced_at = None` and sync_log is never touched, so
+# the global watermark and the certified answer set stay exactly as they were
+# (see the S6/S7 note above `_usage_rows_from_answer`).
+
+
+class ObjectNotCachedError(LookupError):
+    """The GUID is not in the metadata cache for this cluster/org."""
+
+
+class ResyncUnsupportedError(ValueError):
+    """The object type has no per-object resync (tables fan out to dependent models)."""
+
+
+class ResyncInFlightError(RuntimeError):
+    """A dependencies sync is queued/running; a resync would race its persist."""
+
+
+def _model_source_guids(cluster_id: str, org_id: int, body: dict) -> list[str]:
+    """Source-table GUIDs for a model body, via the same alias map the full build resolves against."""
+    pairs = set(_model_alias_map(body).values())
+    guids = {g for _, g in pairs if g}
+    names = {n for n, g in pairs if not g}
+    if names:
+        with get_session() as session:
+            guids.update(
+                session.exec(
+                    select(CachedMetadata.ts_guid).where(
+                        CachedMetadata.cluster_id == cluster_id,
+                        CachedMetadata.org_id == org_id,
+                        col(CachedMetadata.name).in_(names),
+                        col(CachedMetadata.object_type).in_(LOGICAL_TABLE_TYPES),
+                    )
+                ).all()
+            )
+    return sorted(guids)
+
+
+async def resync_object(*, cluster_id: str, org_id: int, guid: str) -> dict:
+    """
+    Re-export ONE liveboard / answer / model and replace just its lineage rows.
+
+    Failure keeps the old rows: if the object's export failed, was an ERROR stub or
+    the wrong kind — or (models) any source table failed — nothing is written and
+    the result is `status="export_failed"`.
+    """
+    import time
+
+    from ts_admin.models.cache.ts_column_lineage import CachedColumnLineage
+    from ts_admin.models.cache.ts_column_usage import CachedColumnUsage
+    from ts_admin.services.archiver_service import _get_cluster
+    from ts_admin.services.job_service import find_in_flight_sync
+    from ts_admin.ts_client import ThoughtSpotClient
+
+    started = time.monotonic()
+    if find_in_flight_sync(cluster_id=cluster_id, org_id=org_id, entity_type="dependencies"):
+        raise ResyncInFlightError("A dependencies sync is in progress — wait for it to finish.")
+    with get_session() as session:
+        meta = session.exec(
+            select(CachedMetadata.object_type).where(
+                CachedMetadata.cluster_id == cluster_id,
+                CachedMetadata.org_id == org_id,
+                CachedMetadata.ts_guid == guid,
+            )
+        ).first()
+    if meta is None:
+        raise ObjectNotCachedError(f"{guid} is not in the metadata cache — sync metadata first.")
+    node_type = "MODEL" if meta.upper() == "VIEW" else _node_type(meta)
+    if node_type not in ("LIVEBOARD", "ANSWER", "MODEL") or meta.upper() in ("SQL_VIEW", "USER_DEFINED"):
+        raise ResyncUnsupportedError(
+            f"{node_type} objects can't be re-synced individually — full dependencies sync required."
+        )
+
+    def _result(status: str, rows: dict[str, int]) -> dict:
+        return {
+            "guid": guid,
+            "node_type": node_type,
+            "status": status,
+            "rows": rows,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+
+    if node_type == "ANSWER":
+        written = await _index_answer(cluster_id=cluster_id, org_id=org_id, guid=guid, force=True)
+        return _result("export_failed" if written is None else "ok", {} if written is None else {"usage": written})
+
+    cluster = _get_cluster(cluster_id)
+    failed: list[str] = []
+    async with ThoughtSpotClient(url=cluster.url, auth=cluster.build_auth_strategy(org_id=org_id)) as client:
+        items = await _export_tml_resilient(client, [guid], failed)
+        if failed or len(items) != 1:
+            return _result("export_failed", {})
+
+        if node_type == "LIVEBOARD":
+            edoc = _load_edoc(items[0])
+            body = _classify_edoc(edoc)[1] if edoc else {}
+            wanted = {guid} | {g for a in _embedded_answers(body) for g in _extract_col_usage_from_answer(a)[0]}
+            with get_session() as session:
+                meta_by_guid = {
+                    r[0]: (r[1], r[2])
+                    for r in session.exec(
+                        select(CachedMetadata.ts_guid, CachedMetadata.name, CachedMetadata.object_type).where(
+                            CachedMetadata.cluster_id == cluster_id,
+                            CachedMetadata.org_id == org_id,
+                            col(CachedMetadata.ts_guid).in_(wanted),
+                        )
+                    ).all()
+                }
+            edges: list = []
+            usage: list = []
+            state = _parse_liveboard(
+                items[0],
+                meta_by_guid=meta_by_guid,
+                cluster_id=cluster_id,
+                org_id=org_id,
+                lb_uses_edges=edges,
+                usage_rows=usage,
+                refused_lbs=[],
+            )
+            if state != "ok":
+                return _result("export_failed", {})
+            with _lineage_write_lock(cluster_id, org_id), get_session() as session:
+                session.exec(
+                    sql_delete(CachedDependency).where(
+                        CachedDependency.cluster_id == cluster_id,
+                        CachedDependency.org_id == org_id,
+                        CachedDependency.relation == "USES",
+                        CachedDependency.source_type == "LIVEBOARD",
+                        CachedDependency.source_guid == guid,
+                    )
+                )
+                session.exec(
+                    sql_delete(CachedColumnUsage).where(
+                        CachedColumnUsage.cluster_id == cluster_id,
+                        CachedColumnUsage.org_id == org_id,
+                        CachedColumnUsage.consumer_type == "LIVEBOARD",
+                        CachedColumnUsage.consumer_guid == guid,
+                    )
+                )
+                session.add_all([*edges, *usage])  # synced_at stays None
+                session.commit()
+            rows = {"lb_uses": len(edges), "usage": len(usage)}
+        else:
+            physical_by_guid: dict[str, dict] = {}
+            physical_by_name: dict[str, dict] = {}
+            model_specs: list[tuple[str, dict]] = []
+            _index_sources(
+                items,
+                meta_by_guid={},
+                conn_name_to_guid={},
+                physical_by_guid=physical_by_guid,
+                physical_by_name=physical_by_name,
+                model_specs=model_specs,
+                connect_edges={},
+            )
+            spec = next((b for g, b in model_specs if g == guid), None)
+            if spec is None:
+                return _result("export_failed", {})
+            sources = _model_source_guids(cluster_id, org_id, spec)
+            returned: set[str] = set()
+            for chunk in _chunks(sources, 50):
+                src_items = await _export_tml_resilient(client, chunk, failed)
+                if failed or _index_sources(
+                    src_items,
+                    meta_by_guid={},
+                    conn_name_to_guid={},
+                    physical_by_guid=physical_by_guid,
+                    physical_by_name=physical_by_name,
+                    model_specs=[],
+                    connect_edges={},
+                ):
+                    return _result("export_failed", {})
+                returned.update((i.get("info") or {}).get("id") or (_load_edoc(i) or {}).get("guid") for i in src_items)
+            if not set(sources) <= returned:
+                return _result("export_failed", {})
+            lineage = _resolve_model_columns(
+                guid=guid,
+                body=spec,
+                physical_by_guid=physical_by_guid,
+                physical_by_name=physical_by_name,
+                cluster_id=cluster_id,
+                org_id=org_id,
+            )
+            with _lineage_write_lock(cluster_id, org_id), get_session() as session:
+                session.exec(
+                    sql_delete(CachedColumnLineage).where(
+                        CachedColumnLineage.cluster_id == cluster_id,
+                        CachedColumnLineage.org_id == org_id,
+                        CachedColumnLineage.model_guid == guid,
+                    )
+                )
+                session.add_all(lineage)  # synced_at stays None
+                session.commit()
+            rows = {"lineage": len(lineage)}
+
+    # ponytail: derive_content_connections is a whole-graph BFS, not scoped to one
+    # object, so it is skipped here — the next dependencies sync re-derives it.
+    # Upgrade: a scoped variant that walks only this object's subgraph.
+    return _result("ok", rows)
 
 
 async def build_answer_index(*, cluster_id: str, org_id: int, job_id: str, incremental: bool = True) -> int:
