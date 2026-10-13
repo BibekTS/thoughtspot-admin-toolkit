@@ -9,6 +9,7 @@ A 429 pauses the whole cluster (all lanes) until ``pause_until``.
 import asyncio
 import functools
 import time
+import weakref
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -36,28 +37,33 @@ class ClusterLimiter:
 
     @asynccontextmanager
     async def slot(self, lane: str = INTERACTIVE):
-        while (remaining := self.pause_until - time.monotonic()) > 0:
-            await asyncio.sleep(remaining)
-        if lane == BACKGROUND:
-            async with self._background, self._global:
-                yield
-        else:
-            async with self._global:
-                yield
+        sems = (self._background, self._global) if lane == BACKGROUND else (self._global,)
+        while True:
+            while (remaining := self.pause_until - time.monotonic()) > 0:
+                await asyncio.sleep(remaining)
+            for sem in sems:
+                await sem.acquire()
+            # A 429 may have landed while we queued; waiters must not fire into it.
+            if self.pause_until <= time.monotonic():
+                break
+            for sem in reversed(sems):
+                sem.release()
+        try:
+            yield
+        finally:
+            for sem in reversed(sems):
+                sem.release()
 
 
-_registry: dict[tuple[int, str], tuple[asyncio.AbstractEventLoop, ClusterLimiter]] = {}
+_registry: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, ClusterLimiter]]" = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def limiter_for(base_url: str) -> ClusterLimiter:
-    # Keyed by loop too: asyncio semaphores bind to one loop, and tests use fresh loops.
-    # The loop is stored so a recycled id() from a dead loop never yields a stale limiter.
-    loop = asyncio.get_running_loop()
-    key = (id(loop), base_url)
-    entry = _registry.get(key)
-    if entry is None or entry[0] is not loop:
-        entry = _registry[key] = (loop, ClusterLimiter())
-    return entry[1]
+    # Keyed by loop: asyncio semaphores bind to one loop, and tests use fresh loops
+    # (weak, so closed loops don't leak).
+    return _registry.setdefault(asyncio.get_running_loop(), {}).setdefault(base_url, ClusterLimiter())
 
 
 def _reset_for_tests() -> None:

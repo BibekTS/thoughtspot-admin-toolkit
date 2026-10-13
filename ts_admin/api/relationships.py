@@ -174,7 +174,7 @@ async def index_answer(
 
 
 @router.post("/deep-index", response_model=DeepIndexResponse, status_code=202)
-def build_deep_index(
+async def build_deep_index(
     background_tasks: BackgroundTasks,
     cluster_id: str | None = Query(default=None),
     org_id: int = Query(default=0),

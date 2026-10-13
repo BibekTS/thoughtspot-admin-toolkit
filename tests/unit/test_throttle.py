@@ -156,3 +156,59 @@ async def test_429_exhausted_raises_rate_limit_error(monkeypatch):
 
     with pytest.raises(TSRateLimitError):
         await retry.with_retry(op)
+
+
+async def test_waiters_queued_before_pause_honour_it():
+    limiter = ClusterLimiter(2, 1)
+    release, issued = asyncio.Event(), []
+
+    async def waiter():
+        async with limiter.slot("interactive"):
+            issued.append(time.monotonic())
+
+    holders = [asyncio.create_task(_hold(limiter, "interactive", {"n": 0, "peak": 0}, release)) for _ in range(2)]
+    await _settle()
+    waiters = [asyncio.create_task(waiter()) for _ in range(3)]
+    await _settle()
+    limiter.pause(0.2)
+    deadline = limiter.pause_until
+    release.set()
+    await asyncio.gather(*holders, *waiters)
+    assert len(issued) == 3
+    assert min(issued) >= deadline - 0.01
+
+
+async def test_client_takes_lane_slot_and_429_pauses_cluster(httpx_mock):
+    from ts_admin.ts_client import ThoughtSpotClient
+    from ts_admin.ts_client.auth import BearerTokenAuth
+
+    base = "https://co.thoughtspot.cloud"
+    throttle._reset_for_tests()
+    httpx_mock.add_response(status_code=429, headers={"Retry-After": "1"})
+    httpx_mock.add_response(json={"ok": 1})
+
+    async with ThoughtSpotClient(url=base, auth=BearerTokenAuth(token="t")) as client:
+        limiter = throttle.limiter_for(base)
+        lanes: list[str] = []
+        paused_until: list[float] = []
+        real_slot, real_pause = limiter.slot, limiter.pause
+
+        def spy_slot(lane="interactive"):
+            lanes.append(lane)
+            return real_slot(lane)
+
+        def spy_pause(seconds):
+            real_pause(seconds)
+            paused_until.append(limiter.pause_until)
+
+        limiter.slot, limiter.pause = spy_slot, spy_pause
+
+        @throttle.background
+        async def job():
+            return await client._request("GET", "/api/rest/2.0/x")
+
+        start = time.monotonic()
+        assert await job() == {"ok": 1}
+
+    assert lanes == ["background", "background"]  # one slot per attempt, in the background lane
+    assert len(paused_until) == 1 and paused_until[0] >= start + 1  # 429 paused the cluster

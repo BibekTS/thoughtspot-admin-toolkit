@@ -90,7 +90,7 @@ async def with_retry(
                 retry_after = parse_retry_after(exc.response.headers.get("Retry-After"))
                 last_exception = TSRateLimitError(retry_after=int(retry_after) if retry_after else None)
                 wait = retry_after or BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
-                wait = min(wait, MAX_RETRY_AFTER_SECONDS) + random.uniform(0, 0.5)
+                wait = min(wait + random.uniform(0, 0.5), MAX_RETRY_AFTER_SECONDS)
                 if on_rate_limit:
                     on_rate_limit(wait)
                 logger.warning(
