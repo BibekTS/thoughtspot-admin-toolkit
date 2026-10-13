@@ -153,3 +153,17 @@ def test_graph_is_cluster_isolated(client, seeded):
     assert body["impact"]["downstream_count"] == 0
     # No c1 owner name leaks into c2's response.
     assert "Alice (c1)" not in json.dumps(body)
+
+
+def test_deep_index_409_when_one_in_flight(client, seeded, monkeypatch):
+    from ts_admin.services import lineage_service
+
+    async def _noop(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(lineage_service, "run_deep_index", _noop)
+    url = "/api/v1/relationships/deep-index?org_id=0&cluster_id="
+    assert client.post(url + "c1").status_code == 202
+    assert client.post(url + "c1").status_code == 409
+    # a different cluster is independent
+    assert client.post(url + "c2").status_code == 202

@@ -36,6 +36,7 @@ from ts_admin.ts_client.exceptions import (
     TSAuthenticationError,
     TSInsufficientPrivilegesError,
 )
+from ts_admin.ts_client.throttle import background
 
 # Every handler imports the client lazily inside its own body; annotation-only
 # here keeps that shape rather than pulling httpx in at module import.
@@ -66,6 +67,7 @@ def _resolve_cluster(cluster_id: str | None):
     return cluster
 
 
+@background
 async def run_sync(*, entity_type: str, org_id: int, job_id: str, cluster_id: str | None = None) -> None:
     """
     Entry point for all sync operations. Dispatches to the correct handler.

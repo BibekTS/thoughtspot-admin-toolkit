@@ -174,15 +174,17 @@ async def index_answer(
 
 
 @router.post("/deep-index", response_model=DeepIndexResponse, status_code=202)
-def build_deep_index(
+async def build_deep_index(
     background_tasks: BackgroundTasks,
     cluster_id: str | None = Query(default=None),
     org_id: int = Query(default=0),
 ) -> DeepIndexResponse:
     """Opt-in: crawl ALL saved answers' column usage as a background job."""
-    from ts_admin.services.job_service import create_job
+    from ts_admin.services.job_service import create_job, find_in_flight
 
     resolved = _resolve_cluster_id(cluster_id)
+    if find_in_flight("lineage_deep_index", cluster_id=resolved, org_id=org_id):
+        raise HTTPException(status_code=409, detail="A deep index is already running for this cluster and org")
     job_id = create_job(
         job_type="lineage_deep_index",
         parameters={"cluster_id": resolved, "org_id": org_id},

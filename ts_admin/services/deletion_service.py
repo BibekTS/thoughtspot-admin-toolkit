@@ -24,6 +24,7 @@ import ts_admin.database as _db
 from ts_admin.models.cache.ts_metadata import CachedMetadata
 from ts_admin.services.lineage_service import _export_tml_resilient
 from ts_admin.ts_client.exceptions import TSAdminError
+from ts_admin.ts_client.throttle import background
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,7 @@ def _finish_export_only(
 # ── Phase 5: Delete with mandatory TML safety net ─────────────────────────────
 
 
+@background
 async def _execute_delete(
     job_id: str,
     cluster_id: str,
@@ -720,6 +722,7 @@ async def _execute_delete(
 # ── Phase 4: Dry-run impact check ─────────────────────────────────────────────
 
 
+@background
 async def dryrun(
     job_id: str,
     cluster_id: str,

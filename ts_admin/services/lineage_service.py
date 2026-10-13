@@ -43,6 +43,7 @@ from ts_admin.ts_client.exceptions import (
     TSServerError,
     TSTimeoutError,
 )
+from ts_admin.ts_client.throttle import background
 
 logger = logging.getLogger(__name__)
 
@@ -1334,6 +1335,7 @@ async def build_answer_index(*, cluster_id: str, org_id: int, job_id: str, incre
     return len(all_rows)
 
 
+@background
 async def run_deep_index(cluster_id: str, org_id: int, job_id: str) -> None:
     """Background-task wrapper for build_answer_index with job/error accounting."""
     from ts_admin.services.job_service import mark_failed, mark_partial
