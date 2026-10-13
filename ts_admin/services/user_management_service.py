@@ -46,6 +46,7 @@ from ts_admin.models.cache.ts_user import (
 from ts_admin.models.user_action_record import UserActionRecord
 from ts_admin.services.sync_status import last_successful_sync
 from ts_admin.ts_client.exceptions import StaleCacheError, TSAdminError
+from ts_admin.ts_client.throttle import background
 
 logger = logging.getLogger(__name__)
 
@@ -439,6 +440,7 @@ def preview_transfer(
         }
 
 
+@background
 async def dryrun_transfer(
     job_id: str,
     cluster_id: str,
@@ -533,6 +535,7 @@ async def dryrun_transfer(
         mark_failed(job_id, exc)
 
 
+@background
 async def execute_transfer(
     job_id: str,
     cluster_id: str,
@@ -903,6 +906,7 @@ async def preview_transfer_sharing(
     return {"items": rows, "total": len(rows), "by_type": by_type}
 
 
+@background
 async def execute_transfer_sharing(
     job_id: str,
     cluster_id: str,
@@ -1321,6 +1325,7 @@ def preview_delete(*, cluster_id: str, user_guids: list[str], org_id: int | None
     }
 
 
+@background
 async def dryrun_delete(
     job_id: str,
     cluster_id: str,
@@ -1397,6 +1402,7 @@ async def dryrun_delete(
         mark_failed(job_id, exc)
 
 
+@background
 async def execute_delete(
     job_id: str,
     cluster_id: str,

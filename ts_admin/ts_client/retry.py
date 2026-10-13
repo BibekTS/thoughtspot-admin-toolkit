@@ -9,7 +9,10 @@ Handles:
 
 import asyncio
 import logging
+import random
+import time
 from collections.abc import Callable, Coroutine
+from email.utils import parsedate_to_datetime
 from typing import Any, TypeVar
 
 import httpx
@@ -22,12 +25,30 @@ T = TypeVar("T")
 
 MAX_RETRIES = 3
 BASE_BACKOFF_SECONDS = 1.0
+MAX_RETRY_AFTER_SECONDS = 60.0
+
+
+def parse_retry_after(value: str | None) -> float | None:
+    """Retry-After as int seconds or HTTP-date -> capped seconds; None if absent/unparseable."""
+    if not value:
+        return None
+    try:
+        seconds = float(int(value.strip()))
+    except ValueError:
+        try:
+            seconds = parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, IndexError):
+            return None
+    if seconds <= 0:
+        return None
+    return min(seconds, MAX_RETRY_AFTER_SECONDS)
 
 
 async def with_retry(
     operation: Callable[[], Coroutine[Any, Any, T]],
     *,
     context: str = "API call",
+    on_rate_limit: Callable[[float], None] | None = None,
 ) -> T:
     """
     Execute an async operation with exponential backoff retry.
@@ -35,6 +56,7 @@ async def with_retry(
     Args:
         operation: Async callable to retry (takes no arguments).
         context:   Human-readable description logged on each retry.
+        on_rate_limit: Called with the backoff seconds on a 429 (cluster-wide pause hook).
 
     Returns:
         The result of the operation on success.
@@ -65,9 +87,12 @@ async def with_retry(
 
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
-                retry_after = int(exc.response.headers.get("Retry-After", 0)) or None
-                last_exception = TSRateLimitError(retry_after=retry_after)
+                retry_after = parse_retry_after(exc.response.headers.get("Retry-After"))
+                last_exception = TSRateLimitError(retry_after=int(retry_after) if retry_after else None)
                 wait = retry_after or BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                wait = min(wait, MAX_RETRY_AFTER_SECONDS) + random.uniform(0, 0.5)
+                if on_rate_limit:
+                    on_rate_limit(wait)
                 logger.warning(
                     "Rate limited on attempt %d/%d for %s — retrying in %.1fs",
                     attempt,

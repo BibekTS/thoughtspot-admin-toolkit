@@ -45,6 +45,7 @@ from ts_admin.ts_client.models import (
     TSUser,
 )
 from ts_admin.ts_client.retry import with_retry
+from ts_admin.ts_client.throttle import current_lane, limiter_for
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +307,8 @@ class ThoughtSpotClient:
     ) -> Any:
         """Make an authenticated request with retry logic."""
 
+        limiter = limiter_for(self._base_url)
+
         async def _do_request() -> Any:
             try:
                 auth_headers = await self._auth.get_headers(self._http)
@@ -313,13 +316,14 @@ class ThoughtSpotClient:
                 raise
 
             try:
-                response = await self._http.request(
-                    method,
-                    path,
-                    json=json,
-                    params=params,
-                    headers=auth_headers,
-                )
+                async with limiter.slot(current_lane.get()):
+                    response = await self._http.request(
+                        method,
+                        path,
+                        json=json,
+                        params=params,
+                        headers=auth_headers,
+                    )
             except httpx.ConnectError as exc:
                 # ConnectError covers both TCP connection failures and TLS/SSL errors
                 # in httpx >= 0.28 (SSLError was removed as a separate class)
@@ -367,7 +371,7 @@ class ThoughtSpotClient:
 
         log_context = context or f"{method} {path}"
         logger.debug("→ %s %s", method, path)
-        result = await with_retry(_do_request, context=log_context)
+        result = await with_retry(_do_request, context=log_context, on_rate_limit=limiter.pause)
         logger.debug("← %s %s OK", method, path)
         return result
 

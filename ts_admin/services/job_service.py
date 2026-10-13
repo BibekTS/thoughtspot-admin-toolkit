@@ -45,7 +45,12 @@ def create_job(*, job_type: str, parameters: dict, cluster_id: str | None = None
 
 
 def find_in_flight_sync(*, cluster_id: str, org_id: int, entity_type: str) -> Job | None:
-    """The QUEUED/RUNNING sync job for (cluster, org, entity), or None.
+    """The QUEUED/RUNNING sync job for (cluster, org, entity), or None (wraps ``find_in_flight``)."""
+    return find_in_flight(f"sync:{entity_type}", cluster_id=cluster_id, org_id=org_id)
+
+
+def find_in_flight(job_type: str, *, cluster_id: str, org_id: int) -> Job | None:
+    """The QUEUED/RUNNING job of ``job_type`` for (cluster, org), or None.
 
     The concurrency guard behind POST /sync/{entity} (S24/S34) and the
     dependencies sync's wait-for-metadata step. Job rows cannot outlive their
@@ -61,7 +66,7 @@ def find_in_flight_sync(*, cluster_id: str, org_id: int, entity_type: str) -> Jo
         rows = session.exec(
             select(Job).where(
                 Job.cluster_id == cluster_id,
-                Job.job_type == f"sync:{entity_type}",
+                Job.job_type == job_type,
                 col(Job.status).in_(["QUEUED", "RUNNING"]),
             )
         ).all()
