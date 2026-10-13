@@ -891,6 +891,13 @@ export const relationshipsApi = {
       { method: "POST" },
     ),
 
+  // Re-export + re-index ONE object's lineage (1 TML export), keeping the rest of the graph.
+  resyncObject: (clusterId: string, orgId: number, guid: string) =>
+    request<{ guid: string; node_type: string; status: "ok" | "export_failed"; rows: Record<string, number>; duration_ms: number }>(
+      `/relationships/objects/${encodeURIComponent(guid)}/resync?cluster_id=${clusterId}&org_id=${orgId}`,
+      { method: "POST" },
+    ),
+
   // Opt-in: crawl ALL saved answers' column usage as a background job.
   deepIndex: (clusterId: string, orgId: number) =>
     request<{ job_id: string }>(
