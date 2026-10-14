@@ -687,9 +687,13 @@ async def test_column_map_survives_an_unexportable_table(monkeypatch, in_memory_
     fake = _PoisonTMLClient("bad-table")
     monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: fake)
 
-    written = await lineage_service.build_column_map(cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job())
+    skipped: list[str] = []
+    written = await lineage_service.build_column_map(
+        cluster_id=CLUSTER_ID, org_id=0, job_id=_make_job(), skipped=skipped
+    )
 
     assert written > 0
+    assert skipped == ["bad-table"]
     with Session(in_memory_db) as session:
         lineage = session.exec(select(CachedColumnLineage)).all()
         connects = session.exec(select(CachedDependency).where(CachedDependency.relation == "CONNECTS")).all()
@@ -697,6 +701,44 @@ async def test_column_map_survives_an_unexportable_table(monkeypatch, in_memory_
     assert connects and connects[0].target_guid == "conn-1"
     # The bad object was bisected down to its own batch and skipped there.
     assert ["bad-table"] in fake.calls
+
+
+async def test_skipped_tml_objects_reach_the_job_result(monkeypatch, in_memory_db, patched_config):
+    """M11: objects the server refused to export are counted in the dependencies
+    job result and surfaced as a warning — not just logged."""
+    from ts_admin.database import get_session
+    from ts_admin.models.job import Job
+    from ts_admin.services import lineage_service
+    from ts_admin.services.job_service import create_job
+    from ts_admin.services.sync_service import _sync_dependencies
+
+    _seed(in_memory_db)
+    _add_metadata(in_memory_db, "bad-table", "BROKEN", "ONE_TO_ONE_LOGICAL")
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _PoisonTMLClient("bad-table"))
+
+    async def _object_tier(*, cluster_id, org_id, job_id, finalize=True):
+        return 2
+
+    async def _no_ensure(**_):
+        return None
+
+    monkeypatch.setattr(lineage_service, "build_object_graph", _object_tier)
+    monkeypatch.setattr("ts_admin.services.sync_service._ensure_metadata_cache", _no_ensure)
+    job_id = create_job(
+        job_type="sync:dependencies",
+        parameters={"entity_type": "dependencies", "org_id": 0},
+        cluster_id=CLUSTER_ID,
+    )
+
+    await _sync_dependencies(org_id=0, job_id=job_id, target_cluster_id=CLUSTER_ID)
+
+    with get_session() as session:
+        job = session.get(Job, job_id)
+    result = job.get_result()
+    assert job.status == "COMPLETE"
+    assert result["failed_exports"] == 1
+    assert result["warnings"] == ["1 object(s) failed TML export and were skipped"]
+    assert "column_error" not in result
 
 
 async def test_unexportable_liveboard_keeps_its_existing_edges(monkeypatch, in_memory_db, patched_config):

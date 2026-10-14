@@ -427,7 +427,7 @@ async def test_dependencies_sync_backfills_content_connections(monkeypatch, in_m
     async def _fake_object_graph(*, cluster_id, org_id, job_id, finalize=True):
         return 2
 
-    async def _fake_column_map(*, cluster_id, org_id, job_id):
+    async def _fake_column_map(*, cluster_id, org_id, job_id, **_):
         return 1
 
     derive_calls: list[dict] = []
@@ -460,6 +460,7 @@ async def test_dependencies_sync_backfills_content_connections(monkeypatch, in_m
         job = session.get(Job, job_id)
         result = json.loads(job.result)
     assert result["content_connections_updated"] == 3
+    assert "warnings" not in result  # a clean run carries no degraded-sync signal
 
 
 # ── Metadata cache completeness (S23) ─────────────────────────────────────────

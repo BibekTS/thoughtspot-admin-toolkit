@@ -13,7 +13,7 @@ import "ag-grid-community/styles/ag-theme-alpine.css";
 
 import { useShell } from "@/components/Shell";
 import { theme } from "@/lib/theme";
-import { formatRelative } from "@/lib/utils";
+import { formatRelative, jobWarnings } from "@/lib/utils";
 import { diagnosticsApi, jobsApi } from "@/lib/api";
 import type { Job, JobStatus } from "@/lib/types";
 
@@ -62,15 +62,19 @@ function buildJobColumns(onShowDetails: (job: Job) => void): ColDef<Job>[] {
       // a half-failed run gets. Without this the admin cannot tell "I stopped
       // this" from "this went wrong", and sees a stale RUNNING pill in between.
       const cancelled = p.data?.is_cancelled === true;
+      // COMPLETE with result.warnings = finished but degraded (e.g. column lineage skipped).
+      const warnings = !cancelled && p.value === "COMPLETE" ? jobWarnings(p.data) : [];
       const label = cancelled
         ? (p.value === "RUNNING" || p.value === "QUEUED" || p.value === "PENDING" ? "CANCELLING" : "CANCELLED")
-        : p.value;
+        : warnings.length ? "WARNINGS" : p.value;
       const c = cancelled
         ? { bg: theme.color.surface3, fg: theme.color.textSecondary }
+        : warnings.length
+        ? { bg: theme.color.warnSoft, fg: theme.color.warn }
         : STATUS_COLORS[p.value] ?? { bg: theme.color.surface3, fg: theme.color.textSecondary };
       return (
         <span
-          title={cancelled ? `Cancelled by an admin — job status ${p.value}` : undefined}
+          title={cancelled ? `Cancelled by an admin — job status ${p.value}` : warnings.join("\n") || undefined}
           style={{
             padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
             fontFamily: theme.font.sans, letterSpacing: "0.02em",
@@ -132,6 +136,14 @@ function buildJobColumns(onShowDetails: (job: Job) => void): ColDef<Job>[] {
     sortable: false,
     cellRenderer: (p: { value: string | null; data?: Job }) => {
       const job = p.data;
+      const warnings = job && !p.value ? jobWarnings(job) : [];
+      if (warnings.length) {
+        return (
+          <span title={warnings.join("\n")} style={{ color: theme.color.warn, fontSize: 12, fontFamily: theme.font.sans }}>
+            {warnings[0]}{warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}
+          </span>
+        );
+      }
       if (!p.value || !job) {
         return <span style={{ color: theme.color.textMuted, fontSize: 12 }}>—</span>;
       }

@@ -852,7 +852,9 @@ def _lineage_write_lock(cluster_id: str, org_id: int) -> threading.Lock:
     return _write_locks.setdefault((cluster_id, org_id), threading.Lock())
 
 
-async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, incremental: bool = True) -> int:
+async def build_column_map(
+    *, cluster_id: str, org_id: int, job_id: str, incremental: bool = True, skipped: list[str] | None = None
+) -> int:
     """
     Phase 2: build the 3-layer column map (LOGICAL_TABLE TML) plus the two edge
     kinds only TML supplies — table→connection (CONNECTS) and liveboard→model
@@ -862,6 +864,7 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     model's column resolution needs its source tables present in the same batch).
     Liveboards are exported incrementally: unchanged ones (modified_at ≤ the last
     column build) keep their existing usage rows + edges. Returns rows written.
+    If `skipped` is given, GUIDs the server refused to export are appended to it.
 
     Raises `SyncCancelled` if cancelled at a TML chunk boundary — before
     `_persist_column_map`, so a half-exported pass never replaces a whole one.
@@ -932,7 +935,8 @@ async def build_column_map(*, cluster_id: str, org_id: int, job_id: str, increme
     usage_rows: list = []
     lb_uses_edges: list = []
     inaccessible = 0
-    failed_exports: list[str] = []  # objects the server refused to export (see _export_tml_resilient)
+    # objects the server refused to export (see _export_tml_resilient)
+    failed_exports = skipped if skipped is not None else []
     refused_lbs: list[str] = []  # liveboards exported as an ERROR stub (no edoc)
     progress = 0
 

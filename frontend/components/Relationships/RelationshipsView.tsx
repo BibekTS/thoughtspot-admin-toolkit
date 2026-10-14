@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { relationshipsApi, syncApi, jobsApi, ApiError } from "@/lib/api";
 import { useToast } from "../Toast";
+import { jobWarnings } from "@/lib/utils";
 import { theme } from "@/lib/theme";
 import type { LineageGraphResponse, RootKind, TopologyItem, TopologyResponse } from "@/lib/types";
 import { ObjectList } from "./ObjectList";
@@ -223,6 +224,10 @@ export function RelationshipsView({
           clearInterval(poll);
           setBuilding(false);
           setBuildProgress(null);
+          const warnings = jobWarnings(job);
+          if (job.status === "COMPLETE" && warnings.length) {
+            toast.warning("Lineage built with warnings", { hint: warnings[0], durationMs: 8000 });
+          }
           setVersion((v) => v + 1); // invalidate caches → refetch topology + graph
         } catch {
           clearInterval(poll);
@@ -234,7 +239,7 @@ export function RelationshipsView({
       setBuilding(false);
       setBuildProgress(null);
     }
-  }, [clusterId, orgId]);
+  }, [clusterId, orgId, toast]);
 
   const runDeepIndex = useCallback(async () => {
     try {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatAbsolute, formatDate, formatDay, formatRelative, parseUtc } from "./utils";
+import { formatAbsolute, formatDate, formatDay, formatRelative, jobWarnings, parseUtc } from "./utils";
 
 // vitest.config.mts pins TZ=America/New_York on purpose. Under TZ=UTC — what CI
 // runs — a naive-UTC string parses to the same instant with or without the `Z`,
@@ -73,5 +73,22 @@ describe("absolute formatting", () => {
   it("does not roll the calendar date back a day for a late-UTC timestamp", () => {
     // 01:30 UTC on the 19th is still the evening of the 18th in New York.
     expect(formatDay("2026-08-19T01:30:00")).toBe("8/18/2026");
+  });
+});
+
+describe("jobWarnings", () => {
+  it("returns the warnings list", () => {
+    expect(jobWarnings({ result: { warnings: ["a", "b"] } })).toEqual(["a", "b"]);
+  });
+
+  it("is empty when there are none", () => {
+    expect(jobWarnings({ result: {} })).toEqual([]);
+    expect(jobWarnings({ result: null })).toEqual([]);
+    expect(jobWarnings(null)).toEqual([]);
+  });
+
+  it("never throws on a malformed shape", () => {
+    expect(jobWarnings({ result: { warnings: "boom" } })).toEqual([]);
+    expect(jobWarnings({ result: { warnings: [1, null, "ok"] } })).toEqual(["ok"]);
   });
 });
