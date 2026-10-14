@@ -124,6 +124,14 @@ class AnswerIndexResponse(BaseModel):
     rows_written: int  # 0 = already indexed / not an answer / inaccessible
 
 
+class ResyncResponse(BaseModel):
+    guid: str
+    node_type: str
+    status: str  # "ok" | "export_failed" (old rows kept)
+    rows: dict[str, int]
+    duration_ms: int
+
+
 class DeepIndexResponse(BaseModel):
     job_id: str
 
@@ -173,16 +181,46 @@ async def index_answer(
     return AnswerIndexResponse(guid=guid, rows_written=rows)
 
 
+@router.post("/objects/{guid}/resync", response_model=ResyncResponse)
+async def resync_object(
+    guid: str,
+    cluster_id: str | None = Query(default=None),
+    org_id: int = Query(default=0),
+) -> ResyncResponse:
+    """Re-export ONE liveboard/answer/model and replace just its lineage rows (cache-only)."""
+    try:
+        result = await lineage_service.resync_object(
+            cluster_id=_resolve_cluster_id(cluster_id), org_id=org_id, guid=guid
+        )
+    except lineage_service.ObjectNotCachedError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except lineage_service.ResyncUnsupportedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except lineage_service.ResyncInFlightError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TSAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except TSInsufficientPrivilegesError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TSObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TSConnectionError, TSServerError, TSResponseParseError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ResyncResponse(**result)
+
+
 @router.post("/deep-index", response_model=DeepIndexResponse, status_code=202)
-def build_deep_index(
+async def build_deep_index(
     background_tasks: BackgroundTasks,
     cluster_id: str | None = Query(default=None),
     org_id: int = Query(default=0),
 ) -> DeepIndexResponse:
     """Opt-in: crawl ALL saved answers' column usage as a background job."""
-    from ts_admin.services.job_service import create_job
+    from ts_admin.services.job_service import create_job, find_in_flight
 
     resolved = _resolve_cluster_id(cluster_id)
+    if find_in_flight("lineage_deep_index", cluster_id=resolved, org_id=org_id):
+        raise HTTPException(status_code=409, detail="A deep index is already running for this cluster and org")
     job_id = create_job(
         job_type="lineage_deep_index",
         parameters={"cluster_id": resolved, "org_id": org_id},

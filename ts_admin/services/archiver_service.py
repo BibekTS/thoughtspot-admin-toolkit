@@ -34,6 +34,7 @@ from ts_admin.ts_client.exceptions import (
     TSAuthenticationError,
     TSInsufficientPrivilegesError,
 )
+from ts_admin.ts_client.throttle import background
 
 if TYPE_CHECKING:  # import only for annotations — the runtime import stays deferred
     from ts_admin.models.archive_record import ArchiveRecord
@@ -508,6 +509,7 @@ def _get_cluster(cluster_id: str):
     return cluster
 
 
+@background
 async def execute(
     job_id: str,
     cluster_id: str,
@@ -791,6 +793,7 @@ def _name_unique_batches(records: list[ArchiveRecord], size: int) -> Iterator[li
         remaining = deferred
 
 
+@background
 async def restore(
     job_id: str,
     cluster_id: str,

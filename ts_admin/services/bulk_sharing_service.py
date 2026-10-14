@@ -36,6 +36,7 @@ from ts_admin.models.cache.ts_user import CachedUser, UserOrgMembership
 from ts_admin.models.share_record import ShareRecord
 from ts_admin.services.deletion_service import SYSTEM_OWNER_NAME
 from ts_admin.ts_client.exceptions import StaleCacheError, TSAdminError
+from ts_admin.ts_client.throttle import background
 
 logger = logging.getLogger(__name__)
 
@@ -493,6 +494,7 @@ def load_dryrun_selection(
 # ── Dry run ──────────────────────────────────────────────────────────────────
 
 
+@background
 async def dryrun_share(
     job_id: str,
     cluster_id: str,
@@ -698,6 +700,7 @@ def _share_failure_reason(
 # ── Execute ────────────────────────────────────────────────────────────────────
 
 
+@background
 async def execute_share(
     job_id: str,
     cluster_id: str,

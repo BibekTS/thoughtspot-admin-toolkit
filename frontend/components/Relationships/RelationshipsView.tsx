@@ -16,9 +16,9 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GitFork, Loader2, ChevronRight, Hammer, History, X, AlertTriangle,
-  Table2, BarChart3, LayoutDashboard, Plug,
+  Table2, BarChart3, LayoutDashboard, Plug, RefreshCw,
 } from "lucide-react";
-import { relationshipsApi, syncApi, jobsApi } from "@/lib/api";
+import { relationshipsApi, syncApi, jobsApi, ApiError } from "@/lib/api";
 import { useToast } from "../Toast";
 import { theme } from "@/lib/theme";
 import type { LineageGraphResponse, RootKind, TopologyItem, TopologyResponse } from "@/lib/types";
@@ -181,6 +181,32 @@ export function RelationshipsView({
     applySelection(item);
     setTrail((prev) => prev.slice(0, index + 1));
   }, [trail, guidToItem, applySelection]);
+
+  // ── Re-sync ONE object's lineage, then refetch its graph ──
+  const [resyncing, setResyncing] = useState(false);
+  const resyncSelected = useCallback(async () => {
+    if (!selected) return;
+    setResyncing(true);
+    try {
+      const r = await relationshipsApi.resyncObject(clusterId, orgId, selected.ts_guid);
+      if (r.status === "ok") {
+        toast.success("Lineage re-synced");
+        graphCache.current.clear();
+        indexedAnswers.current.clear();
+        await loadGraph(selected);
+      } else {
+        toast.error("ThoughtSpot couldn't export this object; existing lineage kept.");
+      }
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.error("A full lineage build is running — try again when it finishes.");
+      } else {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setResyncing(false);
+    }
+  }, [selected, clusterId, orgId, toast, loadGraph]);
 
   // ── In-panel "Build lineage" (mirrors the topbar Sync, self-contained) ──
   const triggerBuild = useCallback(async () => {
@@ -387,6 +413,23 @@ export function RelationshipsView({
                 </span>
               )}
               <span style={{ flex: 1 }} />
+              {selected.node_type !== "CONNECTION" && selected.subtype !== "Table" && (
+                <button
+                  onClick={resyncSelected}
+                  disabled={resyncing}
+                  title="Re-export this object from ThoughtSpot and rebuild its lineage"
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", flexShrink: 0,
+                    border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.control,
+                    background: theme.color.surface, color: theme.color.textSecondary,
+                    cursor: resyncing ? "wait" : "pointer", opacity: resyncing ? 0.6 : 1,
+                    fontSize: 12, fontWeight: 500, fontFamily: theme.font.sans,
+                  }}
+                >
+                  {resyncing ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <RefreshCw size={12} />}
+                  Re-sync lineage
+                </button>
+              )}
               {showDetailTabs && graph && (
                 <>
                   {graph.capped && (

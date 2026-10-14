@@ -108,6 +108,15 @@ an item reaches `done`, move its index line and detail entry to
 | M18 | P2 | Gate-evidence hook captures nothing for gates run in the worktrees M8 mandates | — |
 | M17 | P3 | Performance-review lens doesn't name EXPLAIN QUERY PLAN/correlated-subquery as a checklist item | — |
 | M1 | P4 | Single-source the protected-path list | yes (`.github/workflows/*`, `CLAUDE.md`) |
+| S50 | P2 | Measure sync: expose duration_ms + per-phase timing | — |
+| S51 | P1 | Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409) | — |
+| S52 | P2 | Concurrent TML export under the limiter | — |
+| S53 | P2 | Sync DB write path: WAL, per-page commits, executemany, _persist_column_map single txn + to_thread (Review Board) | — |
+| S54 | P1 | Resync one object's lineage — backend endpoint (Review Board) | — |
+| S55 | P2 | Resync lineage button in Relationships view | — |
+| S56 | P3 | Incremental table TML (Review Board; depends on W8, S28, S53) | — |
+| S57 | P2 | Stop-sync button (UI over existing DELETE /jobs/{id}/cancel) + cancel gaps: _ensure_metadata_cache wait loop and chained metadata job ignore cancel; QUEUED jobs only see cancel at first page | — |
+| W8 | P3 | Verify live: does LOGICAL_TABLE modified_at change on column/schema/connection edits; is sort_options MODIFIED pagination stable (/metadata/search has no modified-since filter) | — |
 
 ### In review (3)
 
@@ -538,6 +547,78 @@ Two org rules contradict each other. The `/improve-cycle` skill's QA BAR step sa
 **2026-10-02 (`/improve-cycle 3`):** researched + planned (hook-only fix: log root from `git rev-parse --git-common-dir`, branch from `git branch --points-at HEAD` for detached worktrees, `detached-<sha>` fallback, leading-`cd` parsing; plan in branch improve/M18-worktree-evidence@0aec0fd notes). Implementation BLOCKED: the auto-mode permission classifier denies agent edits to `.claude/hooks/*` as Self-Modification. Needs a human to allow the edit or apply the patch. Every gate run this cycle (all in worktrees) again landed in no evidence log.
 
 **2026-10-02 (unblocked).** Human retried with auto mode off; the hook edit went through. Shipped in branch `improve/M18-worktree-evidence` (`c245dd9`, `323a976`): log root from `git rev-parse --git-common-dir`, detached-HEAD branch from `git branch --points-at HEAD` (`main` wins and is skipped; one other branch → it; else `detached-<sha>`; never `HEAD.log`), leading `cd X &&`, `cd X ;` and `cd X;` parsing, and `GATE` now matches quoted executables (`".../ruff" check`). Live check: a gate run in a detached worktree landed in the primary checkout's `improve__M18-worktree-evidence.log`, which did not exist beforehand. Review Board found one CONFIRMED misattribution (`cd X; gate`), fixed with a test.
+
+### S50 — Measure sync: expose duration_ms + per-phase timing
+
+`P2` · **open** · protected: no
+
+Baseline for the sync-performance phases (S51–S53). `duration_ms` already exists on `SyncLog` but is not exposed; the dependencies sync has no per-phase breakdown, and `build_column_map` does not report export volume, so speed-ups cannot be measured. Plan: `ts_admin/api/sync.py` `EntitySyncStatus`, `sync_service._sync_dependencies`, `lineage_service.build_column_map(stats=…)`.
+
+**Acceptance criteria:** `GET /api/v1/sync` returns `duration_ms` per entity from `SyncLog`, non-null after a completed sync and null while running (`tests/unit/test_sync_status.py`); the dependencies result carries `phase_ms` with object-tier, column-pass and derive keys, all non-negative; `build_column_map(stats=…)` reports export call count, objects exported, 429 count and ms split by tables vs liveboards, asserted on a fake client in `tests/unit/test_lineage_service.py`; calling with no `stats` leaves output unchanged.
+
+### S51 — Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409)
+
+`P1` · **open** · protected: no
+
+Gate for S52–S53. Sync fans out six jobs and lineage overlaps them, and `deep-index` has no in-flight guard, so parallelism without a shared limiter would hammer ThoughtSpot. New `ts_admin/ts_client/throttle.py` `ClusterLimiter(max_concurrent=6, interactive_reserve=2)` with a `lane("background")` ContextVar; slots are held in `ThoughtSpotClient._request`/`_do_request` around `self._http.request` only. `retry.py` parses `Retry-After` as int or HTTP-date (today a `ValueError`).
+
+**Acceptance criteria:** Peak in-flight requests per cluster never exceed 6 (fake-client test in `tests/unit/test_throttle.py`); background work cannot take the 2 interactive-reserved slots, so an interactive request acquires while background work saturates; a 429 pauses all lanes cluster-wide, asserted in `tests/unit/test_retry.py`; `Retry-After` as an integer or HTTP-date is honoured, capped at 60s with jitter, and no longer raises; backoff sleeps hold no slot; `POST /relationships/deep-index` returns 409 when one is already in flight (`job_service.find_in_flight(job_type, …)`, covered in `tests/integration/test_relationships_api.py`).
+
+### S52 — Concurrent TML export under the limiter
+
+`P2` · **open** · protected: no
+
+Biggest expected speed win, but only after S51. TML export loops in `build_column_map` (2a/2c) and `build_answer_index` are sequential. Plan: `_export_chunks(...)` async iterator modelled on `_sweep_dependents` task ownership (`lineage_service.py:~279-319`), `EXPORT_CONCURRENCY=3`, yielding in chunk order so parsing stays deterministic and memory bounded.
+
+**Acceptance criteria:** Peak concurrency of `_export_chunks` is ≤ 3 (fake client in tests); output of `build_column_map` 2a/2c and `build_answer_index` is identical to the sequential build on the same fixture; cancelling mid-chunk persists nothing and leaves no orphan tasks (finally cancels and drains); a failed chunk keeps the old rows for its objects (`failed_set` and persist-after-all unchanged); on a real cluster, S50 timings show the lineage phase faster with identical row counts.
+
+### S53 — Sync DB write path: WAL, per-page commits, executemany, _persist_column_map single txn + to_thread (Review Board)
+
+`P2` · **open** · protected: no
+
+Partly closes S26 and S29. SQLite runs without WAL, users/groups commit per row, metadata inserts are per-row ORM, and `_persist_column_map` deletes and inserts in separate commits on the event loop. Plan: `database.py` connect listener sets `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`; one `IN (page ids)` SELECT and one commit per page; executemany for `CachedMetadata`; `client.search_metadata` fetches two specs concurrently.
+
+**Acceptance criteria:** Every new connection has the WAL / `synchronous=NORMAL` / `busy_timeout=5000` PRAGMAs (asserted in a unit test); users/groups sync issues one `IN` SELECT and one commit per page, not per row (statement/commit count test); metadata persist uses executemany, and the two-spec concurrent `search_metadata` keeps its partial-error contract (`tests/unit/test_client_metadata_specs.py`, `test_client_pagination.py`); `_persist_column_map` delete+insert is one transaction run via `asyncio.to_thread`, and a crash injected between delete and insert leaves the previous rows intact; row sets identical in `tests/unit/test_sync_service.py`; `EXPLAIN QUERY PLAN` on a realistically sized DB is attached to the PR (Review Board).
+
+### S54 — Resync one object's lineage — backend endpoint (Review Board)
+
+`P1` · **open** · protected: no
+
+Lets an admin refresh lineage for one liveboard, answer, model or table instead of a full rebuild. `lineage_service.resync_object(cluster_id, org_id, guid, force=True)` runs on the interactive lane, resolves type from `CachedMetadata`, and runs one transaction per object with every written row `synced_at=None` so the global watermark never moves. Endpoint `POST /relationships/objects/{guid}/resync?force=true&cluster_id=&org_id=`. Refactors `_index_sources` and `_parse_liveboard` out of `build_column_map`. Cache-only, so no dry-run, audit or registry change.
+
+**Acceptance criteria:** The endpoint returns the per-object status synchronously; it returns 409 for an in-flight `sync:dependencies` job, a same-guid resync in flight, or fan-out over 50 objects ("run full sync"), covered in `tests/unit/test_lineage_resync.py` and `tests/integration/test_relationships_api.py`; resyncing a liveboard, answer, model or table replaces only that object's rows per the plan's type table, and matches a full build for that object; a failed own export (or stub) writes nothing and returns `status="export_failed"` with old rows kept, and a failed model source skips only that model; the watermark and certified set are unchanged (S6/S7 rules); full `build_column_map` output stays identical after the refactor (S27 test, `tests/unit/test_lineage_columns.py`); `EXPLAIN QUERY PLAN` on a realistically sized DB is attached (Review Board).
+
+### S55 — Resync lineage button in Relationships view
+
+`P2` · **open** · protected: no
+
+UI over S54. A "Re-sync lineage" (force) action in the root-object header of `frontend/components/Relationships/RelationshipsView.tsx`, `relationshipsApi.resyncObject` in `frontend/lib/api.ts`, graph refetch after success, and an optional node action in `LineageFlow.tsx`.
+
+**Acceptance criteria:** `relationshipsApi.resyncObject` calls the S54 endpoint with `force=true`; the action sits in the root-object header and the graph refetches on success; a loading state (disabled button) shows while in flight, and a 409 or network error shows an inline error state; `export_failed` is shown plainly while the existing graph stays visible; only DESIGN.md tokens are used and both themes are checked; `npx tsc --noEmit` and `npm run build` pass.
+
+### S56 — Incremental table TML (Review Board; depends on W8, S28, S53)
+
+`P3` · **open** · protected: no
+
+Last phase of the sync-performance plan. Changed set = tables with `modified_at` > watermark, plus never-derived tables (S28 "certified" fix), plus models using a changed table; the scoped delete is chunked `model_guid IN (…)`. Full-rebuild fallbacks stay in place. Must not start until W8, S28 and S53 are done.
+
+**Acceptance criteria:** With one changed table, only that table and its dependent models are re-exported (test in `tests/unit/test_lineage_incremental.py`); the chunked scoped delete leaves rows for untouched models unchanged; the full rebuild runs when the watermark is NULL, when `incremental=False`, or when the previous build is empty; the signal used is the one W8 verified live; `EXPLAIN QUERY PLAN` on a realistically sized DB is attached to the PR (Review Board).
+
+### S57 — Stop-sync button (UI over existing DELETE /jobs/{id}/cancel) + cancel gaps: _ensure_metadata_cache wait loop and chained metadata job ignore cancel; QUEUED jobs only see cancel at first page
+
+`P2` · **open** · protected: no
+
+The backend cancel endpoint `DELETE /jobs/{id}/cancel` exists but the sync UI has no way to call it. Three cancel gaps also remain: the `_ensure_metadata_cache` wait loop does not check cancel, a chained metadata job started by a sync ignores cancel, and a QUEUED job only sees cancel at its first page rather than before it starts.
+
+**Acceptance criteria:** A Stop button on a running sync calls `DELETE /jobs/{id}/cancel`, moves the job to CANCELLED, and disables itself while cancelling; the `_ensure_metadata_cache` wait loop checks cancel on each iteration and returns promptly on cancel (test does not wait for the metadata job to finish); a chained metadata job does not start once its parent is cancelled (test asserts no metadata job row is started); a QUEUED job honours cancel before its first page fetch (test cancels a queued job and asserts zero pages fetched); the button uses DESIGN.md tokens in both themes, and `tsc` and `npm run build` pass.
+
+### W8 — Verify live: does LOGICAL_TABLE modified_at change on column/schema/connection edits; is sort_options MODIFIED pagination stable (/metadata/search has no modified-since filter)
+
+`P3` · **open** · protected: no
+
+No code. Decides whether S56 can use `modified_at` as its changed-set signal. `/metadata/search` has no modified-since filter, so metadata sync stays a full sweep regardless. Needs a live ThoughtSpot cluster.
+
+**Acceptance criteria:** On a live cluster, a column, schema or connection edit on a test LOGICAL_TABLE is made and the result (does `modified_at` change?) is recorded in `docs/org-memory/codebase.md` with the cluster version; `sort_options: MODIFIED` pagination is checked across at least two pages with a mid-crawl edit, and any duplicate or missed object is recorded; the modified-since filter absence is confirmed on the tested version; if `modified_at` does not change on those edits, the S56 row is updated to use a different signal before S56 starts.
 
 ## In review
 
