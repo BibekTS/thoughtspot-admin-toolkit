@@ -6,7 +6,7 @@ and execute endpoints then delegate to the shared deletion_service that
 also powers the Archiver's Phase 5 delete.
 
 Resolve modes:
-  POST /api/v1/deleter/resolve/downstream  — root GUID → its dependents
+  POST /api/v1/deleter/resolve/downstream  — root GUID → the root + its dependents
   POST /api/v1/deleter/resolve/tag         — tag name → all tagged objects
   POST /api/v1/deleter/resolve/list        — GUID list → matched rows + unrecognized
 
