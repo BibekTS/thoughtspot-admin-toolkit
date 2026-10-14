@@ -208,9 +208,9 @@ describe("buildSyncColor", () => {
 describe("degraded lineage (SUCCESS + error)", () => {
   const fresh = stampAgo(30 * MINUTE);
 
-  it("shows the age plus 'lineage incomplete' in the warn-text token", () => {
+  it("shows the age plus 'no column lineage' in the warn-text token", () => {
     const degraded = log("SUCCESS", fresh, "Column lineage was not built");
-    expect(buildSyncLabel(degraded, false, null, NOW)).toBe("Synced 30m ago · lineage incomplete");
+    expect(buildSyncLabel(degraded, false, null, NOW)).toBe("Synced 30m ago · no column lineage");
     expect(buildSyncColor(degraded, false, NOW)).toBe(theme.color.warnText);
   });
 

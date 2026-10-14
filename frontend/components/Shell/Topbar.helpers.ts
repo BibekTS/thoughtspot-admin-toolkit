@@ -74,7 +74,7 @@ export function buildSyncLabel(
   if (!log.synced_at) return "Unknown";
 
   const age = ageLabel(log.synced_at, now);
-  return isDegraded(log) ? `${age} · lineage incomplete` : age;
+  return isDegraded(log) ? `${age} · no column lineage` : age;
 }
 
 /** SUCCESS + a non-blank `error` = phase 2 (column lineage) was skipped; the object graph is fine. */

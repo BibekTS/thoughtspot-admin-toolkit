@@ -179,7 +179,7 @@ Per-entity sync status in the topbar; dot color ages with the data:
 | < 1h | success | "Synced just now / 23m ago" |
 | 1–6h | muted | "Synced 3h ago" |
 | > 6h | warn | "Synced 8h ago" |
-| Synced, lineage incomplete | warn | "Synced 8m ago · lineage incomplete" |
+| Synced, no column lineage | warn | "Synced 8m ago · no column lineage" |
 | Never / failed | danger | "Never synced" / "Sync failed" |
 
 Never show live-fetched and cached data without labeling which is which.
