@@ -73,7 +73,17 @@ export function buildSyncLabel(
   if (log.status === "IN_PROGRESS") return "Syncing…";
   if (!log.synced_at) return "Unknown";
 
-  const minutes = Math.floor((now - parseUtc(log.synced_at).getTime()) / 60_000);
+  const age = ageLabel(log.synced_at, now);
+  return isDegraded(log) ? `${age} · no column lineage` : age;
+}
+
+/** SUCCESS + a non-blank `error` = phase 2 (column lineage) was skipped; the object graph is fine. */
+function isDegraded(log: SyncLog): boolean {
+  return log.status === "SUCCESS" && !!log.error?.trim();
+}
+
+function ageLabel(syncedAt: string, now: number): string {
+  const minutes = Math.floor((now - parseUtc(syncedAt).getTime()) / 60_000);
   if (minutes < 2)  return "Synced just now";
   if (minutes < 60) return `Synced ${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
@@ -89,6 +99,7 @@ export function buildSyncColor(log: SyncLogOrUnknown, isSyncing: boolean, now: n
   // Same token as the local isSyncing branch above — in-flight, not alarming.
   if (log.status === "IN_PROGRESS") return theme.color.accent;
   if (!log.synced_at) return theme.color.textMuted;
+  if (isDegraded(log)) return theme.color.warnText;
 
   const hours = (now - parseUtc(log.synced_at).getTime()) / 3_600_000;
   if (hours < 1) return theme.color.success;

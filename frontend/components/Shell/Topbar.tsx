@@ -110,10 +110,16 @@ export default function Topbar({
           "Never synced" pill and a dead button there is just misleading. */}
       {entityType && (
         <>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 96, flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncColor }} />
-              <span style={{ fontSize: 12, color: theme.color.textMuted, fontFamily: theme.font.sans, whiteSpace: "nowrap" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 96, flexShrink: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              <div style={{ width: 6, height: 6, flexShrink: 0, borderRadius: "50%", background: syncColor }} />
+              <span
+                title={syncLabel}
+                style={{
+                  fontSize: 12, color: theme.color.textMuted, fontFamily: theme.font.sans,
+                  whiteSpace: "nowrap", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
+                }}
+              >
                 {syncLabel}
               </span>
             </div>

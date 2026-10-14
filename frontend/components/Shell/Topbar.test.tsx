@@ -25,8 +25,8 @@ function stampAgo(ms: number): string {
   return new Date(NOW - ms).toISOString().slice(0, 19);
 }
 
-function log(status: SyncStatus, syncedAt: string | null): SyncLog {
-  return { entity_type: "metadata", synced_at: syncedAt, record_count: 1, status, error: null };
+function log(status: SyncStatus, syncedAt: string | null, error: string | null = null): SyncLog {
+  return { entity_type: "metadata", synced_at: syncedAt, record_count: 1, status, error };
 }
 
 // Exhaustive by construction: `Record<SyncStatus, …>` means adding a value to
@@ -202,5 +202,29 @@ describe("buildSyncColor", () => {
   it("takes precedence over the log while a local sync is in flight", () => {
     expect(buildSyncColor(STATUS_FIXTURES.NOT_SYNCED, true, NOW)).toBe(theme.color.accent);
     expect(buildSyncColor(null, true, NOW)).toBe(theme.color.accent);
+  });
+});
+
+describe("degraded lineage (SUCCESS + error)", () => {
+  const fresh = stampAgo(30 * MINUTE);
+
+  it("shows the age plus 'no column lineage' in the warn-text token", () => {
+    const degraded = log("SUCCESS", fresh, "Column lineage was not built");
+    expect(buildSyncLabel(degraded, false, null, NOW)).toBe("Synced 30m ago · no column lineage");
+    expect(buildSyncColor(degraded, false, NOW)).toBe(theme.color.warnText);
+  });
+
+  it.each([null, "", "   "])("treats SUCCESS with error %j as healthy", (error) => {
+    expect(buildSyncLabel(log("SUCCESS", fresh, error), false, null, NOW)).toBe("Synced 30m ago");
+    expect(buildSyncColor(log("SUCCESS", fresh, error), false, NOW)).toBe(theme.color.success);
+  });
+
+  it("lets FAILED, IN_PROGRESS and isSyncing take precedence over the marker", () => {
+    const err = "Column lineage was not built";
+    expect(buildSyncLabel(log("FAILED", fresh, err), false, null, NOW)).toBe("Sync failed");
+    expect(buildSyncColor(log("FAILED", fresh, err), false, NOW)).toBe(theme.color.danger);
+    expect(buildSyncLabel(log("IN_PROGRESS", fresh, err), false, null, NOW)).toBe("Syncing…");
+    expect(buildSyncLabel(log("SUCCESS", fresh, err), true, null, NOW)).toBe("Syncing…");
+    expect(buildSyncColor(log("SUCCESS", fresh, err), true, NOW)).toBe(theme.color.accent);
   });
 });

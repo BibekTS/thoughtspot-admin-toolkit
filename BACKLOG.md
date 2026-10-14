@@ -35,6 +35,7 @@ only when a human promotes them.
 | 2026-10-02 · /improve-cycle 3 (W7, S49, S30; M18 blocked; incl. B1 close of M10) | 1 | 1 | 44 open · 3 in-review · 2 feedback |
 | 2026-10-14 · M11 (/improve-cycle, incl. B1 close of W7/S49/S30/M18/S51) | 5 | 4 | 54 open · 1 in-review · 2 feedback |
 | 2026-10-14 · S58+S60 (/improve-cycle, B4 batch) | 0 | 2 (S62, S63) | 54 open · 3 in-review · 2 feedback |
+| 2026-10-14 · S59 (/improve-cycle) | 0 | 1 (S64) | 54 open · 4 in-review · 2 feedback |
 
 ## ID taxonomy (mirrors the three standing goals)
 
@@ -116,18 +117,19 @@ an item reaches `done`, move its index line and detail entry to
 | S56 | P3 | Incremental table TML (Review Board; depends on W8, S28, S53) | — |
 | S57 | P2 | Stop-sync button (UI over existing DELETE /jobs/{id}/cancel) + cancel gaps: _ensure_metadata_cache wait loop and chained metadata job ignore cancel; QUEUED jobs only see cancel at first page | — |
 | W8 | P3 | Verify live: does LOGICAL_TABLE modified_at change on column/schema/connection edits; is sort_options MODIFIED pagination stable (/metadata/search has no modified-since filter) | — |
-| S59 | P3 | Topbar should show degraded lineage | — |
 | S61 | P3 | Zero-output detector for a column pass that raises nothing | — |
 | S62 | P3 | Sweep remaining warn-as-text sites to `--warn-text` | — |
 | S63 | P4 | RelationshipsView.runDeepIndex does not poll the deep-index job, so its warnings never toast | — |
+| S64 | P4 | Topbar page title collapses to 0px at ~800px viewport when the sync label is degraded | — |
 
-### In review (3)
+### In review (4)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
 | M11 | P2 | A silently-degraded best-effort pass reports success at every level | — |
 | S58 | P3 | Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme) | — |
 | S60 | P3 | build_answer_index skips answers without surfacing a warning | — |
+| S59 | P3 | Topbar should show degraded lineage | — |
 
 ### Done
 
@@ -585,14 +587,6 @@ No code. Decides whether S56 can use `modified_at` as its changed-set signal. `/
 
 **Acceptance criteria:** On a live cluster, a column, schema or connection edit on a test LOGICAL_TABLE is made and the result (does `modified_at` change?) is recorded in `docs/org-memory/codebase.md` with the cluster version; `sort_options: MODIFIED` pagination is checked across at least two pages with a mid-crawl edit, and any duplicate or missed object is recorded; the modified-since filter absence is confirmed on the tested version; if `modified_at` does not change on those edits, the S56 row is updated to use a different signal before S56 starts.
 
-### S59 — Topbar should show degraded lineage
-
-`P3` · **open** · protected: no
-
-The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCCESS; `buildSyncLabel` / `buildSyncColor` do not surface it, so a degraded lineage reads as 'Synced 2m ago'. Audit the SUCCESS-gated consumers (`sync_status.py`, `RelationshipsView` `lineageBuilt`) for the same blind spot. Filed 2026-10-14 against main (M11 cycle).
-
-**Acceptance criteria:** A SyncLog with status SUCCESS and a non-empty `error` renders a distinct degraded label/color in the Topbar (covered in the Topbar label test); the SUCCESS-gated consumers `sync_status.py` and `RelationshipsView` `lineageBuilt` are audited and each either handles the degraded case or is documented as correct; both themes checked.
-
 ### S61 — Zero-output detector for a column pass that raises nothing
 
 `P3` · **open** · protected: no
@@ -616,6 +610,14 @@ S58 added `--warn-text` but applied it only to the PARTIAL/WARNINGS pills, the c
 `RelationshipsView.runDeepIndex` fires the `lineage_deep_index` job without polling it, so the S60 `result["warnings"]` (and failures) never reach a toast. Filed 2026-10-14 (S58+S60 cycle).
 
 **Acceptance criteria:** After starting a deep index from the Relationships view, the job is polled to a terminal state and a COMPLETE job with `result["warnings"]` raises the warning toast (same channel as the M11 dependencies toast); covered by a test.
+
+### S64 — Topbar page title collapses to 0px at ~800px viewport when the sync label is degraded
+
+`P4` · **open** · protected: no
+
+Measured by the craft lens (S59 cycle): the Topbar page title is 29.9px wide on main but 0px with the degraded sync label at an 800px viewport; the org selector is never clipped. Pre-existing, separate finding: at <=640px the topbar already overflows on main (472px content vs 420px viewport). No existing row covers it (S35 is the no-automated-guard row). Filed 2026-10-14 (S59 cycle).
+
+**Acceptance criteria:** A title floor or a shorter/collapsing sync label at 800–1024px keeps a visible title stub, measured headless at 1024 and 800 in both the clean and degraded states; no regression of the S33 org-selector invariant; the <=640px overflow is measured and either fixed or documented.
 
 ## In review
 
@@ -1002,3 +1004,14 @@ Unmet criterion, exactly one: *"must resolve, not worsen, S41."* Manual (non-sel
   never `confirm_write_operations` in a cycle. S33's lessons landed as defaults
   too: CEO writes no product code; visual changes need a measured visual
   artifact; new-row criteria are written against `main`.
+
+### S59 — Topbar should show degraded lineage
+
+`P3` · **in-review** · protected: no
+
+The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCCESS; `buildSyncLabel` / `buildSyncColor` do not surface it, so a degraded lineage reads as 'Synced 2m ago'. Audit the SUCCESS-gated consumers (`sync_status.py`, `RelationshipsView` `lineageBuilt`) for the same blind spot. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A SyncLog with status SUCCESS and a non-empty `error` renders a distinct degraded label/color in the Topbar (covered in the Topbar label test); the SUCCESS-gated consumers `sync_status.py` and `RelationshipsView` `lineageBuilt` are audited and each either handles the degraded case or is documented as correct; both themes checked.
+
+**2026-10-14 (`/improve-cycle S59`).** Implemented on `improve/S59-topbar-degraded-lineage` (commits `c1139ad`, `bec1ad1` + status-dot `flexShrink: 0` fix). Premise correction: nothing wrote `SyncLog.error` on a SUCCESS row before; added `lineage_service.mark_dependencies_degraded` (filters cluster_id + org_id + entity_type, `SQLAlchemyError` only), called from `_sync_dependencies` when warnings exist or the column pass was cancelled (marker 'Column lineage pass was cancelled'). Topbar label 'Synced <age> · no column lineage' (the original 'lineage incomplete' broke the 800px layout), dot + label colour `warnText`. `sync_status.py` consumers audited: they read only the 'metadata' row (correct as-is, commented). `RelationshipsView` `lineageBuilt` = SUCCESS only, intentionally independent of phase 2 (commented). Settings has no sync page; no other frontend reader of `SyncLog.error`. Criteria ('distinct degraded' label/colour) met.
+

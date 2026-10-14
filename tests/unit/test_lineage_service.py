@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, create_engine, select
+from sqlmodel import Session, col, create_engine, select
 
 CLUSTER_ID = "c1"
 
@@ -771,15 +771,31 @@ async def test_failed_column_pass_keeps_object_tier_and_completes_with_warning(
             raise TSServerError(status_code=503, body="unavailable")
 
     _seed_metadata(in_memory_db, CLUSTER_ID)
+    # Neighbours that must NOT receive the marker: same cluster/other org, and other cluster/same org.
+    with get_session() as session:
+        for cid, oid in ((CLUSTER_ID, 7), ("other-cluster", 0)):
+            session.add(SyncLog(cluster_id=cid, org_id=oid, entity_type="dependencies", status="SUCCESS"))
+        session.commit()
     job_id = _make_job()
     monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _NoConnections())
 
     await run_sync(entity_type="dependencies", org_id=0, job_id=job_id, cluster_id=CLUSTER_ID)
 
     with get_session() as session:
+        others = (
+            session.exec(select(SyncLog).where(SyncLog.entity_type == "dependencies", col(SyncLog.org_id) != 0)).all()
+            + session.exec(select(SyncLog).where(SyncLog.cluster_id == "other-cluster")).all()
+        )
+    assert len(others) == 2 and all(r.error is None for r in others)
+
+    with get_session() as session:
         job = session.get(Job, job_id)
         edges = session.exec(select(CachedDependency).where(CachedDependency.cluster_id == CLUSTER_ID)).all()
-        log = session.exec(select(SyncLog).where(SyncLog.entity_type == "dependencies")).one()
+        log = session.exec(
+            select(SyncLog).where(
+                SyncLog.entity_type == "dependencies", SyncLog.cluster_id == CLUSTER_ID, SyncLog.org_id == 0
+            )
+        ).one()
     assert job.status == "COMPLETE"
     result = job.get_result()
     assert result["column_error"]
@@ -788,6 +804,110 @@ async def test_failed_column_pass_keeps_object_tier_and_completes_with_warning(
     assert "content_connections_updated" in result
     assert len(edges) == 3  # object tier survived
     assert log.status == "SUCCESS"
+    # S59: the degradation is persisted on the SyncLog row (what the Topbar reads),
+    # without restamping the phase-1 timestamp.
+    assert log.error and "Column lineage was not built" in log.error
+    assert log.synced_at is not None
+    assert (datetime.now(timezone.utc) - log.synced_at.replace(tzinfo=timezone.utc)).total_seconds() < 300
+
+
+async def test_cancelled_column_pass_without_warnings_still_marks_dependencies(
+    monkeypatch, in_memory_db, patched_config
+):
+    """S59: a cancelled phase 2 with no warnings leaves a marker-only SyncLog error (not a result warning)."""
+    from ts_admin.database import get_session
+    from ts_admin.models.job import Job
+    from ts_admin.models.sync_log import SyncLog
+    from ts_admin.services import lineage_service
+    from ts_admin.services.sync_service import run_sync
+
+    async def _cancel(*a, **k):
+        raise lineage_service.SyncCancelled("cancelled")
+
+    _seed_metadata(in_memory_db, CLUSTER_ID)
+    job_id = _make_job()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _FakeClient())
+    monkeypatch.setattr(lineage_service, "build_column_map", _cancel)
+
+    await run_sync(entity_type="dependencies", org_id=0, job_id=job_id, cluster_id=CLUSTER_ID)
+
+    with get_session() as session:
+        log = session.exec(select(SyncLog).where(SyncLog.entity_type == "dependencies")).one()
+        job = session.get(Job, job_id)
+    assert log.status == "SUCCESS"
+    assert log.error == "Column lineage pass was cancelled"
+    assert "warnings" not in job.get_result()
+
+
+async def test_clean_dependencies_sync_clears_stale_degraded_marker(monkeypatch, in_memory_db, patched_config):
+    """S59: phase 1's rewrite is the only clearer of the degraded marker."""
+    from ts_admin.database import get_session
+    from ts_admin.models.sync_log import SyncLog
+    from ts_admin.services.sync_service import run_sync
+
+    _seed_metadata(in_memory_db, CLUSTER_ID)
+    with get_session() as session:
+        session.add(
+            SyncLog(
+                cluster_id=CLUSTER_ID, org_id=0, entity_type="dependencies", status="SUCCESS", error="stale warning"
+            )
+        )
+        session.commit()
+    job_id = _make_job()
+
+    class _Clean(_FakeClient):
+        async def list_connections(self):
+            return []
+
+        async def tml_export(self, *, object_ids, edoc_format=None):
+            return []
+
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _Clean())
+
+    await run_sync(entity_type="dependencies", org_id=0, job_id=job_id, cluster_id=CLUSTER_ID)
+
+    with get_session() as session:
+        log = session.exec(select(SyncLog).where(SyncLog.entity_type == "dependencies")).one()
+    assert log.status == "SUCCESS"
+    assert log.error is None
+
+
+async def test_degraded_marker_write_failure_keeps_job_complete(monkeypatch, in_memory_db, patched_config):
+    """S59: a failing marker write is logged, never flips the job to FAILED."""
+    from sqlalchemy.exc import OperationalError
+
+    from ts_admin.database import get_session
+    from ts_admin.models.job import Job
+    from ts_admin.services import lineage_service
+    from ts_admin.services.sync_service import run_sync
+    from ts_admin.ts_client.exceptions import TSServerError
+
+    class _NoConnections(_FakeClient):
+        async def list_connections(self):
+            raise TSServerError(status_code=503, body="unavailable")
+
+    _seed_metadata(in_memory_db, CLUSTER_ID)
+    job_id = _make_job()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _NoConnections())
+    real_get_session = lineage_service.get_session
+    original = lineage_service.mark_dependencies_degraded
+
+    def _marker_with_locked_db(cluster_id, org_id, error):
+        def _locked():
+            raise OperationalError("UPDATE", {}, Exception("db locked"))
+
+        lineage_service.get_session = _locked
+        try:
+            original(cluster_id, org_id, error)
+        finally:
+            lineage_service.get_session = real_get_session
+
+    monkeypatch.setattr(lineage_service, "mark_dependencies_degraded", _marker_with_locked_db)
+
+    await run_sync(entity_type="dependencies", org_id=0, job_id=job_id, cluster_id=CLUSTER_ID)
+
+    with get_session() as session:
+        assert session.get(Job, job_id).status == "COMPLETE"
 
 
 # ── Transitive shortcut reduction (answer→table when answer→model→table) ────────

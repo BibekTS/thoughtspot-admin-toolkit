@@ -1017,3 +1017,11 @@ passing the full five-gate bar. The generalisable lessons:
 - The `prefers-contrast` block only overrides `--border` / `--text-muted`, not warn tokens.
 - `build_answer_index` runs only in the `lineage_deep_index` job (`run_deep_index`), not the dependencies sync, and now sets `result["warnings"]` when exports failed.
 - An answer whose export failed and that is certified+unmodified is not retried by the incremental deep index, so that warning is the only signal. `RelationshipsView.runDeepIndex` does not poll the job, so it never toasts (S63).
+
+## Degraded lineage in the Topbar (S59, 2026-10-14, improve/S59-topbar-degraded-lineage)
+
+- SyncLog SUCCESS + non-empty `error` now means "phase 2 degraded" for entity `dependencies` ONLY (`lineage_service.mark_dependencies_degraded`, called from `_sync_dependencies`). Any reader treating a non-empty `error` as failure is wrong.
+- Only the next phase-1 `_write_dependencies_sync_log` (error=None) clears it. A cancelled phase 2 always leaves the 'Column lineage pass was cancelled' marker.
+- Topbar sync block shrinks (flexShrink 1, minWidth 96) with ellipsis + title; the status dot is `flexShrink: 0` (it is the only colour cue). Rigid-content budget is ~586px at an 800px viewport; label growth beyond ~90px breaks the layout (title collapses, see S64).
+- Playwright browser build mismatch needs an explicit `executablePath` for headless measurement.
+- Mutation hygiene on macOS: `sed -i ''`, backup + python replace, never `git checkout` to restore.

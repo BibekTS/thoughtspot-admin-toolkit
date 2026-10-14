@@ -275,3 +275,5 @@ One line per cycle on process friction. Format:
 - 2026-10-14 · M11 cycle (+ B1 close of W7/S49/S30/M18/S51): friction: the architect has no Write tool so the CEO had to transcribe the plan; reviewer agents (security/regression/simplicity/craft) skipped creating worktrees despite M8 and read the diff only; QA's `| tail` hid exit codes. B1 reconcile also found S54/S55 merged with unmet criteria (reopened) and the Open heading count already stale (said 44, was 53).
 
 - 2026-10-14 · S58+S60 batch: architect skipped (briefs were specific; CEO wrote the plan file); all five reviewers used their own worktrees this time (M8 friction resolved); QA exit codes now captured via log files instead of `| tail`.
+
+- 2026-10-14 · S59: researcher caught a wrong row premise (nothing wrote SyncLog.error); security reviewer skipped its worktree again despite instruction; craft headless measurement caught a layout break no gate sees (800px), and the re-measure caught a dot-shrink the fix itself introduced.
