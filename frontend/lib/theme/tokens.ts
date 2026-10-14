@@ -52,6 +52,7 @@ export const theme = {
     successBorder: "var(--success-border)",
     warn: "var(--warn)",
     warnSoft: "var(--warn-soft)",
+    warnText: "var(--warn-text)",
     warnBorder: "var(--warn-border)",
     danger: "var(--danger)",
     dangerSoft: "var(--danger-soft)",
