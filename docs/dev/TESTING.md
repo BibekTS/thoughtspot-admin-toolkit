@@ -249,7 +249,7 @@ weakened guard the same as a security review.
 
 ## A green test is not evidence until you know it can go red
 
-Four ways a test in this repo has been vacuous in production. Check all four
+Five ways a test in this repo has been vacuous in production. Check all five
 before you count a test as coverage.
 
 **1. It never asserts the predicate it guards.** A "spares X" test placed on a
@@ -278,6 +278,10 @@ binds function objects at import time, so `monkeypatch.setattr(module,
 original — the test then silently exercises the real handler. Measured: hoisting
 `run_sync`'s handler dict to a constant broke 4 tests this way. Dispatch tables
 that tests patch must be built per call (`sync_service.sync_handlers()`).
+
+**5. It never exercises a failing dependency.** A best-effort pass is only
+tested honestly against a failing dependency: assert `result["warnings"]` is
+set, and that a clean run has none.
 
 ## Refusals on a 202 endpoint (S23 / M10)
 

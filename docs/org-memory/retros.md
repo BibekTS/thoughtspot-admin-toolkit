@@ -271,3 +271,5 @@ One line per cycle on process friction. Format:
   pipeline caught it before it shipped as a false gate.
 
 - 2026-10-02 · /improve-cycle 3 (W7, S49, S30; M18 blocked): the venv silently pointed at a deleted interpreter, so the cycle's first real finding was dependency drift (sqlmodel 0.0.45 naive-datetime ValueError) — CI had last resolved 0.0.42 on 2026-09-17 with no lockfile; agents can't edit `.claude/hooks/*` (Self-Modification), so hook rows need a human; the plan's datetime sweep regex missed `x or datetime.min` and only the Review Board caught the resulting 500 — sweeps for a type-semantics change must grep sentinels (`datetime\.(min|max)`) too; S30's criteria were stale (code rewritten in PR #31) and named an equivalent mutant.
+
+- 2026-10-14 · M11 cycle (+ B1 close of W7/S49/S30/M18/S51): friction: the architect has no Write tool so the CEO had to transcribe the plan; reviewer agents (security/regression/simplicity/craft) skipped creating worktrees despite M8 and read the diff only; QA's `| tail` hid exit codes. B1 reconcile also found S54/S55 merged with unmet criteria (reopened) and the Open heading count already stale (said 44, was 53).

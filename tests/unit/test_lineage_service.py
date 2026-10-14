@@ -736,7 +736,7 @@ async def test_cancelled_column_pass_does_not_complete_the_job(monkeypatch, in_m
     async def _object_tier(*, cluster_id, org_id, job_id, finalize=True):
         return 2
 
-    async def _cancelled_columns(*, cluster_id, org_id, job_id, incremental=True):
+    async def _cancelled_columns(*, cluster_id, org_id, job_id, incremental=True, skipped=None):
         raise lineage_service.SyncCancelled("column map cancelled after 50 object(s)")
 
     monkeypatch.setattr(lineage_service, "build_object_graph", _object_tier)
@@ -751,6 +751,43 @@ async def test_cancelled_column_pass_does_not_complete_the_job(monkeypatch, in_m
     assert result["cancelled"] is True
     # The object tier IS committed and reported — only the enrichment was dropped.
     assert result["record_count"] == 2
+
+
+async def test_failed_column_pass_keeps_object_tier_and_completes_with_warning(
+    monkeypatch, in_memory_db, patched_config
+):
+    """M11: a swallowed column-pass failure leaves the job COMPLETE, the object
+    graph intact — and puts a human-readable warning in the job result so the
+    Jobs UI / toast can say the sync was degraded."""
+    from ts_admin.database import get_session
+    from ts_admin.models.cache.ts_dependency import CachedDependency
+    from ts_admin.models.job import Job
+    from ts_admin.models.sync_log import SyncLog
+    from ts_admin.services.sync_service import run_sync
+    from ts_admin.ts_client.exceptions import TSServerError
+
+    class _NoConnections(_FakeClient):
+        async def list_connections(self):
+            raise TSServerError(status_code=503, body="unavailable")
+
+    _seed_metadata(in_memory_db, CLUSTER_ID)
+    job_id = _make_job()
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _NoConnections())
+
+    await run_sync(entity_type="dependencies", org_id=0, job_id=job_id, cluster_id=CLUSTER_ID)
+
+    with get_session() as session:
+        job = session.get(Job, job_id)
+        edges = session.exec(select(CachedDependency).where(CachedDependency.cluster_id == CLUSTER_ID)).all()
+        log = session.exec(select(SyncLog).where(SyncLog.entity_type == "dependencies")).one()
+    assert job.status == "COMPLETE"
+    result = job.get_result()
+    assert result["column_error"]
+    assert len(result["warnings"]) == 1
+    assert result["warnings"][0].startswith("Column lineage was not built")
+    assert "content_connections_updated" in result
+    assert len(edges) == 3  # object tier survived
+    assert log.status == "SUCCESS"
 
 
 # ── Transitive shortcut reduction (answer→table when answer→model→table) ────────

@@ -14,7 +14,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { theme } from "@/lib/theme";
 
-type ToastKind = "success" | "error" | "info";
+type ToastKind = "success" | "error" | "info" | "warning";
 
 interface Toast {
   id: number;
@@ -29,6 +29,7 @@ interface ToastApi {
   success: (message: string, opts?: { hint?: string; durationMs?: number }) => void;
   error: (message: string, opts?: { hint?: string; durationMs?: number; action?: Toast["action"] }) => void;
   info: (message: string, opts?: { hint?: string; durationMs?: number }) => void;
+  warning: (message: string, opts?: { hint?: string; durationMs?: number }) => void;
   dismiss: (id: number) => void;
 }
 
@@ -37,6 +38,7 @@ const ToastContext = createContext<ToastApi | null>(null);
 const COLORS: Record<ToastKind, { bg: string; border: string; fg: string; accent: string }> = {
   success: { bg: theme.color.successSoft, border: theme.color.successBorder, fg: theme.color.textPrimary, accent: theme.color.success },
   error: { bg: theme.color.dangerSoft, border: theme.color.dangerBorder, fg: theme.color.textPrimary, accent: theme.color.danger },
+  warning: { bg: theme.color.warnSoft, border: theme.color.warnBorder, fg: theme.color.textPrimary, accent: theme.color.warn },
   info: { bg: theme.color.violetSoft, border: theme.color.violetBorder, fg: theme.color.textPrimary, accent: theme.color.accent2 },
 };
 
@@ -78,6 +80,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       success: (m, o) => push("success", m, o),
       error: (m, o) => push("error", m, o),
       info: (m, o) => push("info", m, o),
+      warning: (m, o) => push("warning", m, o),
       dismiss,
     }),
     [push, dismiss],
@@ -178,5 +181,5 @@ export function useToast(): ToastApi {
   const ctx = useContext(ToastContext);
   if (ctx) return ctx;
   const noop = () => undefined;
-  return { success: noop, error: noop, info: noop, dismiss: noop };
+  return { success: noop, error: noop, info: noop, warning: noop, dismiss: noop };
 }

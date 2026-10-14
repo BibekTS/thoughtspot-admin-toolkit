@@ -909,8 +909,11 @@ async def _sync_dependencies(*, org_id: int, job_id: str, target_cluster_id: str
     column_count = 0
     column_error: str | None = None
     cancelled = False
+    skipped: list[str] = []
     try:
-        column_count = await lineage_service.build_column_map(cluster_id=cluster_id, org_id=org_id, job_id=job_id)
+        column_count = await lineage_service.build_column_map(
+            cluster_id=cluster_id, org_id=org_id, job_id=job_id, skipped=skipped
+        )
     except lineage_service.SyncCancelled as exc:
         # Must precede `except Exception`, which would otherwise swallow a cancel
         # into a COMPLETE job — the exact "204 that cancels nothing" this fixes.
@@ -920,8 +923,8 @@ async def _sync_dependencies(*, org_id: int, job_id: str, target_cluster_id: str
         raise
     # Deliberately blind, and it stays blind. This is a best-effort column pass:
     # narrowing it to named classes would let any one of them destroy the object
-    # tier already committed above (see the comment at :851-855 and
-    # tests/unit/test_lineage_service.py:676). It is permitted to swallow ANY
+    # tier already committed above (see
+    # test_failed_column_pass_keeps_object_tier_and_completes_with_warning). It is permitted to swallow ANY
     # error for that reason, and it swallows nothing that matters silently —
     # TSAuthenticationError re-raises on the line above, SyncCancelled is handled
     # above that, and whatever is caught here is logged AND surfaced to the UI as
@@ -939,8 +942,15 @@ async def _sync_dependencies(*, org_id: int, job_id: str, target_cluster_id: str
     # the graph just silently had no connection nodes and no column map. Carry
     # the reason into the job result so the Jobs UI can show what was skipped.
     result: dict = {"entity_type": "dependencies", "record_count": edge_count, "column_count": column_count}
+    warnings: list[str] = []
     if column_error:
         result["column_error"] = column_error[:500]
+        warnings.append(f"Column lineage was not built (object graph kept): {column_error[:200]}")
+    if skipped:
+        result["failed_exports"] = len(skipped)
+        warnings.append(f"{len(skipped)} object(s) failed TML export and were skipped")
+    if warnings:
+        result["warnings"] = warnings
     if cancelled:
         # The object tier IS committed and its SyncLog written — only the column
         # enrichment was dropped. That is a genuine partial result, not a failure.

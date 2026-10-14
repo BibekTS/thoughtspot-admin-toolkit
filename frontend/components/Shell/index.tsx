@@ -14,6 +14,7 @@ import Topbar from "./Topbar";
 import { theme } from "@/lib/theme";
 import { clustersApi, jobsApi, syncApi } from "@/lib/api";
 import { useToast } from "../Toast";
+import { jobWarnings } from "@/lib/utils";
 import type { Cluster, Org, SyncLog, EntityType } from "@/lib/types";
 import type { SyncLogOrUnknown } from "./Topbar.helpers";
 
@@ -300,6 +301,11 @@ export default function AppShell({ pageTitle, entityType, onSyncComplete, childr
                 action: { label: "Open Diagnostics", onClick: () => router.push("/settings/diagnostics") },
               });
             }
+          }
+
+          const warnings = jobWarnings(updated);
+          if (updated.status === "COMPLETE" && warnings.length) {
+            toast.warning("Sync finished with warnings", { hint: warnings[0], durationMs: 8000 });
           }
 
           // Refresh sync log then reload page data

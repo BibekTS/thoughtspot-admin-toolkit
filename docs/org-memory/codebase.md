@@ -1000,3 +1000,12 @@ passing the full five-gate bar. The generalisable lessons:
 
 - Agents in auto mode cannot edit `.claude/hooks/*` (Self-Modification denial).
 - Worktree-isolated agents: absolute paths with spaces in command names are refused (use relative `../../../.venv/bin/python`); `git -C` outside the worktree is refused; compound commands with `cd`/git may be refused — one git command per call. In a worktree, `python -m pytest` from the worktree root makes the worktree's `ts_admin` shadow the editable install.
+
+## Degraded-but-COMPLETE sync signal (M11, 2026-10-14, improve/M11-degraded-sync-visible)
+
+- `Job.result["warnings"]: list[str]` is the generic degraded-but-COMPLETE channel. Set only when non-empty. PARTIAL still means cancelled, not degraded. The frontend reads it only via `jobWarnings()` in `frontend/lib/utils.ts` (WARNINGS pill in the Jobs UI + a warning toast).
+- `build_column_map(..., skipped=list)` takes an out-param list that the caller turns into warnings. `failed_exports` is a shared result key (answer index sets it too, but emits no warning: S60).
+- The column-map pass in `sync_service.py` (~:930) is still a blanket swallow (M16). Any fake of `build_column_map` in tests must accept `**_` or `skipped`; a wrong signature raises `TypeError`, which the swallow turns into a degraded run instead of a failure.
+- `Toast` has a `warning` kind with no action button.
+- The Topbar sync label comes from `SyncLog`, not from the job, so job warnings never reach it (a degraded lineage write keeps SyncLog status SUCCESS: S59).
+- `--warn` / `--warn-soft` text contrast is 2.76:1 / 3.06:1 in the light theme, below the DESIGN.md 4.5:1 bar (S58).

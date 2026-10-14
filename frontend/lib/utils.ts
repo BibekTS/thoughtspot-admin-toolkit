@@ -63,3 +63,12 @@ function relativeDays(elapsedMs: number): string {
   if (days < 365) return `${Math.floor(days / 30)}mo ago`;
   return `${Math.floor(days / 365)}y ago`;
 }
+
+/**
+ * `result.warnings` of a finished job — the admin-visible "completed, but
+ * degraded" signal. Never throws: any malformed shape yields [].
+ */
+export function jobWarnings(job: { result?: Record<string, unknown> | null } | null | undefined): string[] {
+  const w = job?.result?.warnings;
+  return Array.isArray(w) ? w.filter((x): x is string => typeof x === "string") : [];
+}

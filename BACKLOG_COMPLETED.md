@@ -9,7 +9,7 @@ detail entry here.
 
 ## Index
 
-### Done items (37)
+### Done items (42)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
@@ -50,6 +50,11 @@ detail entry here.
 | F9 | P3 | Export tagged content to TML without deleting | — |
 | F10 | P3 | Transfer ownership of selected objects from the Metadata screen | yes (`tests/integration/test_dryrun_safety.py`) |
 | M14 | P2 | Blanket except in batch loops: total failure reports PARTIAL | — |
+| W7 | P1 | sqlmodel ≥0.0.45 rejects naive datetimes — every fresh install crashes on cache queries | — |
+| S49 | P2 | Background targets strand jobs on non-refusal exceptions (pre-mark_running windows) | — |
+| S30 | P2 | build_answer_index incremental predicates have zero mutation coverage | — |
+| M18 | P2 | Gate-evidence hook captures nothing for gates run in the worktrees M8 mandates | — |
+| S51 | P1 | Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409) | — |
 
 ## Completed items
 
@@ -514,3 +519,82 @@ A fail-closed guard placed inside a Starlette background-task target is fail-**s
 The design was re-cut mid-cycle: the CEO's proposed AST "no refusal after `create_job`" check was refuted by the architect and then **measured** — applying the real S23 shape (guard deleted from the router, `raise` at the top of `execute_share`) leaves that check GREEN, because the router then holds zero raises. The inventory lock became the primary gate and the ordering check is demoted and documented as not covering the S23 class. The Review Board returned three CONFIRMED findings, all fixed in `22200b6`: the new `reviewer.md` bullet keyed "fail-silent" on **location** rather than **mechanism**, so read standalone it would have manufactured CONFIRMED findings on the four refusals that are load-bearing inside their targets; the TESTING.md heading stated unconditionally what is only true of `raise`; and a leftover comment told the next agent to narrow the walker rather than append a row. Mutations F/G/H (module-qualified `create_job`, module-qualified guard call, and a `raise` inside an `except`) were green on the first test and are red on the fixed one. Touches no protected path — no `human-approved` label needed.
 
 **2026-10-02 (B1 close).** PR #58 merged (`bcd39dc`). Criteria re-verified on main: TESTING.md "Refusals on a 202 endpoint (S23 / M10)" section plus the `reviewer.md`/`implementer.md` rule; `tests/integration/test_stale_cache_endpoints.py` asserts 409 and no Job row (`test_no_job_row_is_created`) with a 202 twin; `tests/unit/test_background_dispatch_sites.py` locks the 17-site inventory; `pytest tests/unit/test_background_dispatch_sites.py tests/integration/test_stale_cache_endpoints.py` gives 13 passed.
+
+### W7 — sqlmodel ≥0.0.45 rejects naive datetimes — every fresh install crashes on cache queries
+
+`P1` · **in-review** · protected: no
+
+
+**Evidence (measured 2026-10-02, Python 3.12, fresh `pip install -e ".[dev]"`):**
+- `pyproject.toml:27` pins `sqlmodel>=0.0.19` (no upper bound, no lockfile).
+- CI's last run on main (2026-09-17) resolved sqlmodel 0.0.42 → green.
+- Bisect against `pytest tests/unit tests/integration`: 0.0.42 → 897 passed;
+  0.0.43, 0.0.44 → `test_metadata_api.py` 30 passed; 0.0.45, 0.0.46 → 4 failed there;
+  0.0.47 (today's latest) → **78 failed, 819 passed** on the full suite.
+- Every failure is the same: `sqlmodel/sql/sqltypes.py:34` raises
+  `ValueError: Datetime values must have timezone information` when a NAIVE
+  datetime is bound as a query parameter, e.g. `ts_metadata.last_accessed_at < ?`
+  in the metadata stats / archiver-candidate count queries (75 of 77 hits) and a
+  `modified_at < ?` variant (6).
+- Consequence for users: `pip install` today pulls 0.0.47, so the Metadata
+  stats endpoint and Archiver queries 500. CI on the next PR will go red too.
+
+**Acceptance criteria (draft, provisional until a human confirms):**
+1. `pytest tests/unit tests/integration` is green on the latest sqlmodel (0.0.47)
+   AND on the oldest version the pin allows.
+2. Fresh installs cannot resolve a sqlmodel that breaks the app: either the code
+   works on ≥0.0.45, or the pin excludes the breaking range — the PR states which
+   and why.
+3. If the code path is fixed (not only pinned): stored/compared datetimes have
+   one documented convention (naive-UTC vs aware-UTC) and a test drives a real
+   writer → reader round-trip under the new sqlmodel, not a hand-seeded row.
+4. No existing SQLite cache becomes unreadable: rows already written by the
+   prior version (naive values in SQLite) still compare correctly after upgrade.
+
+**2026-10-02.** Shipped in PR #61 (branch `improve/W7-sqlmodel-aware-datetimes`): a fix, not a pin; floor raised to `sqlmodel>=0.0.45`. Review Board CONFIRMED and fixed a `datetime.min` sort 500 in `deletion_service.dryrun_objects`. Criteria above remain provisional until a human confirms.
+
+**2026-10-14 (B1 close).** Verified against main this cycle (PR #61 merged); moved from BACKLOG.md.
+
+### S49 — Background targets strand jobs on non-refusal exceptions (pre-mark_running windows)
+
+`P2` · **in-review** · protected: no
+
+Found during the M10 research sweep of all 17 `background_tasks.add_task` sites. The S23 *refusal* class is closed, but three windows still strand a `Job` on a **non-refusal** exception (e.g. a local sqlite `OperationalError`), because they run outside the target's `try`. `bulk_sharing_service.py:758-799` runs outside any `try` **and before** `mark_running` at `:800`, so a failure there leaves the row at `QUEUED` / `error=None` — the exact S23 symptom from a different cause, with the UI polling forever. `user_management_service.py:590-658` and `:945-978` are outside their `try` but after `mark_running`, so they strand at `RUNNING`. The only recovery is `_recover_stuck_jobs` (`ts_admin/main.py:79-169`) at the next restart, which is also the delete-cache reconciler and must not be disturbed.
+
+**Acceptance criteria:** A non-refusal exception raised anywhere in a background target marks the job FAILED with the exception recorded, rather than leaving it `QUEUED`/`RUNNING` until a restart — i.e. the preamble before `mark_running` is inside the target's error handling. A test raises inside the `bulk_sharing_service.execute_share` preamble (before `mark_running`) and asserts the `Job` row ends FAILED with a non-null `error`; the non-vacuity twin asserts the same test fixture yields a normal SUCCESS/COMPLETE when nothing raises. `_recover_stuck_jobs` is left unchanged.
+
+**2026-10-14 (B1 close).** Verified against main this cycle (merged to main); moved from BACKLOG.md.
+
+### S30 — build_answer_index incremental predicates have zero mutation coverage
+
+`P2` · **in-review** · protected: no
+
+`build_answer_index`'s `_changed` twin (`lineage_service.py:897`) is byte-identical to `build_column_map`'s but has **zero** mutation coverage: dropping its `last_built is None` disjunct leaves the entire 37-test lineage suite green, while the same mutation at `:559` is now killed by S27. Answer-index incrementality is unpinned, and `build_answer_index` carries the same watermark shape S7 was rejected over (`max(CachedColumnUsage.synced_at)` over *surviving* rows, so partial deletion is permanent)
+
+**Acceptance criteria:** The ANSWER tier's incremental predicates are each killed by at least one test — at minimum, dropping `last_built is None` or the `modified_at > last_built` comparison at `lineage_service.py:897` turns a test red; the mutations and results are appended to the table in [docs/dev/TESTING.md](docs/dev/TESTING.md)
+
+**2026-10-14 (B1 close).** Verified against main this cycle (merged to main); moved from BACKLOG.md.
+
+### M18 — Gate-evidence hook captures nothing for gates run in the worktrees M8 mandates
+
+`P2` · **in-review** · protected: no
+
+Two org rules contradict each other. The `/improve-cycle` skill's QA BAR step says the `PostToolUse` hook (`.claude/hooks/gate_evidence.py`) appends every gate command and exit code to `.claude/evidence/<branch>.log`, and that **"a gate you cannot find in the log did not run in this cycle"** — the CEO is told to quote that file rather than an agent's recollection. But M8 requires review/QA agents to run gates in a **detached `git worktree`**, and the hook writes per-branch under the primary checkout, so it captured **zero** lines for the M10 cycle even though the full bar ran four times. Verified 2026-09-16: `.claude/evidence/` has no `improve__M10-background-refusal-rule.log` while QA reported a complete green bar. The effect is that the one anti-self-report mechanism the skill defines is silently inert for exactly the runs it was written to police, and a CEO following the rule literally would conclude no gate ran.
+
+**Acceptance criteria:** Gate runs executed inside a detached worktree land in the same evidence log as runs in the primary checkout (e.g. the hook resolves the log path from `git rev-parse --git-common-dir` / the worktree's branch rather than the cwd), OR the skill's QA BAR step is corrected to state that worktree runs are not captured and names what the CEO should quote instead. Proven by running one gate inside a detached worktree and showing the line appears in the expected log; the non-vacuity twin shows the log is empty for that branch beforehand.
+
+**2026-10-02 (`/improve-cycle 3`):** researched + planned (hook-only fix: log root from `git rev-parse --git-common-dir`, branch from `git branch --points-at HEAD` for detached worktrees, `detached-<sha>` fallback, leading-`cd` parsing; plan in branch improve/M18-worktree-evidence@0aec0fd notes). Implementation BLOCKED: the auto-mode permission classifier denies agent edits to `.claude/hooks/*` as Self-Modification. Needs a human to allow the edit or apply the patch. Every gate run this cycle (all in worktrees) again landed in no evidence log.
+
+**2026-10-02 (unblocked).** Human retried with auto mode off; the hook edit went through. Shipped in branch `improve/M18-worktree-evidence` (`c245dd9`, `323a976`): log root from `git rev-parse --git-common-dir`, detached-HEAD branch from `git branch --points-at HEAD` (`main` wins and is skipped; one other branch → it; else `detached-<sha>`; never `HEAD.log`), leading `cd X &&`, `cd X ;` and `cd X;` parsing, and `GATE` now matches quoted executables (`".../ruff" check`). Live check: a gate run in a detached worktree landed in the primary checkout's `improve__M18-worktree-evidence.log`, which did not exist beforehand. Review Board found one CONFIRMED misattribution (`cd X; gate`), fixed with a test.
+
+**2026-10-14 (B1 close).** Verified against main this cycle (merged to main); moved from BACKLOG.md.
+
+### S51 — Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409)
+
+`P1` · **open** · protected: no
+
+Gate for S52–S53. Sync fans out six jobs and lineage overlaps them, and `deep-index` has no in-flight guard, so parallelism without a shared limiter would hammer ThoughtSpot. New `ts_admin/ts_client/throttle.py` `ClusterLimiter(max_concurrent=6, interactive_reserve=2)` with a `lane("background")` ContextVar; slots are held in `ThoughtSpotClient._request`/`_do_request` around `self._http.request` only. `retry.py` parses `Retry-After` as int or HTTP-date (today a `ValueError`).
+
+**Acceptance criteria:** Peak in-flight requests per cluster never exceed 6 (fake-client test in `tests/unit/test_throttle.py`); background work cannot take the 2 interactive-reserved slots, so an interactive request acquires while background work saturates; a 429 pauses all lanes cluster-wide, asserted in `tests/unit/test_retry.py`; `Retry-After` as an integer or HTTP-date is honoured, capped at 60s with jitter, and no longer raises; backoff sleeps hold no slot; `POST /relationships/deep-index` returns 409 when one is already in flight (`job_service.find_in_flight(job_type, …)`, covered in `tests/integration/test_relationships_api.py`).
+
+**2026-10-14 (B1 close).** Verified against main this cycle (PR #66 merged (e9ebfaf)); moved from BACKLOG.md.
