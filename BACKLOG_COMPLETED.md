@@ -9,7 +9,7 @@ detail entry here.
 
 ## Index
 
-### Done items (42)
+### Done items (44)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
@@ -55,6 +55,8 @@ detail entry here.
 | S30 | P2 | build_answer_index incremental predicates have zero mutation coverage | — |
 | M18 | P2 | Gate-evidence hook captures nothing for gates run in the worktrees M8 mandates | — |
 | S51 | P1 | Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409) | — |
+| S54 | P1 | Resync one object's lineage — backend endpoint (Review Board) | — |
+| S55 | P2 | Resync lineage button in Relationships view | — |
 
 ## Completed items
 
@@ -598,3 +600,27 @@ Gate for S52–S53. Sync fans out six jobs and lineage overlaps them, and `deep-
 **Acceptance criteria:** Peak in-flight requests per cluster never exceed 6 (fake-client test in `tests/unit/test_throttle.py`); background work cannot take the 2 interactive-reserved slots, so an interactive request acquires while background work saturates; a 429 pauses all lanes cluster-wide, asserted in `tests/unit/test_retry.py`; `Retry-After` as an integer or HTTP-date is honoured, capped at 60s with jitter, and no longer raises; backoff sleeps hold no slot; `POST /relationships/deep-index` returns 409 when one is already in flight (`job_service.find_in_flight(job_type, …)`, covered in `tests/integration/test_relationships_api.py`).
 
 **2026-10-14 (B1 close).** Verified against main this cycle (PR #66 merged (e9ebfaf)); moved from BACKLOG.md.
+
+### S54 — Resync one object's lineage — backend endpoint (Review Board)
+
+`P1` · **done** · protected: no
+
+Lets an admin refresh lineage for one liveboard, answer, model or table instead of a full rebuild. `lineage_service.resync_object(cluster_id, org_id, guid, force=True)` runs on the interactive lane, resolves type from `CachedMetadata`, and runs one transaction per object with every written row `synced_at=None` so the global watermark never moves. Endpoint `POST /relationships/objects/{guid}/resync?force=true&cluster_id=&org_id=`. Refactors `_index_sources` and `_parse_liveboard` out of `build_column_map`. Cache-only, so no dry-run, audit or registry change.
+
+**Acceptance criteria:** The endpoint returns the per-object status synchronously; it returns 409 for an in-flight `sync:dependencies` job, a same-guid resync in flight, or fan-out over 50 objects ("run full sync"), covered in `tests/unit/test_lineage_resync.py` and `tests/integration/test_relationships_api.py`; resyncing a liveboard, answer, model or table replaces only that object's rows per the plan's type table, and matches a full build for that object; a failed own export (or stub) writes nothing and returns `status="export_failed"` with old rows kept, and a failed model source skips only that model; the watermark and certified set are unchanged (S6/S7 rules); full `build_column_map` output stays identical after the refactor (S27 test, `tests/unit/test_lineage_columns.py`); `EXPLAIN QUERY PLAN` on a realistically sized DB is attached (Review Board).
+
+**Reopened 2026-10-14 (reconcile).** PR #67 merged, but the criteria are only partly met on main. Met: `export_failed` keeps old rows and writes nothing; 409 on an in-flight `dependencies` sync; 404/422 mappings. Unmet: 409 for a same-guid resync in flight and for fan-out over 50 objects; the `force` query param; table support (the service refuses tables with `ResyncUnsupportedError` -> 422); no `EXPLAIN QUERY PLAN` attached. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
+
+**Criteria amended 2026-10-14 (human-directed: the user delegated the S54/S55 decision to the session; original criteria kept above for the record).** The shipped design (PR #67) deliberately narrowed the plan, and the amended criteria accept it: (1) tables are refused with `ResyncUnsupportedError` -> 422 "full dependencies sync required", because a table resync fans out to every dependent model; this removes the fan-out-over-50 guard, which only existed for tables. (2) No `force` query param: every resync forces (answers call `_index_answer(force=True)`, liveboards/models always re-export), so a non-forcing resync would be a no-op. (3) No same-guid 409: the request is synchronous, the S55 button is disabled while in flight, and two concurrent calls each replace the object's rows in one transaction from a fresh export (last writer wins, consistent); not worth a guard on a single-admin localhost tool. (4) `EXPLAIN QUERY PLAN` not applicable: the resync path uses only keyed selects/deletes, no new join or correlated subquery (the CLAUDE.md trigger). Remaining criteria (synchronous status, 409 on in-flight dependencies sync, export_failed keeps old rows, watermark/certified set unchanged, build_column_map refactor identical) were verified met in the 2026-10-14 reconcile. Closed done.
+
+### S55 — Resync lineage button in Relationships view
+
+`P2` · **done** · protected: no
+
+UI over S54. A "Re-sync lineage" (force) action in the root-object header of `frontend/components/Relationships/RelationshipsView.tsx`, `relationshipsApi.resyncObject` in `frontend/lib/api.ts`, graph refetch after success, and an optional node action in `LineageFlow.tsx`.
+
+**Acceptance criteria:** `relationshipsApi.resyncObject` calls the S54 endpoint with `force=true`; the action sits in the root-object header and the graph refetches on success; a loading state (disabled button) shows while in flight, and a 409 or network error shows an inline error state; `export_failed` is shown plainly while the existing graph stays visible; only DESIGN.md tokens are used and both themes are checked; `npx tsc --noEmit` and `npm run build` pass.
+
+**Reopened 2026-10-14 (reconcile).** PR #68 merged, but the criteria are only partly met on main. Unmet: `resyncObject` sends no `force=true` (the backend has no `force` param); errors surface as a toast, not an inline error state; both-themes / tokens-only unverified. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
+
+**Criteria amended 2026-10-14 (human-directed, with S54).** (1) `force=true` dropped with S54's `force` param (every resync forces). (2) Errors and `export_failed` surface as toasts rather than an inline error state: the existing graph stays visible and the message is plain ("ThoughtSpot couldn't export this object; existing lineage kept."), consistent with the app's toast pattern. Tokens-only verified by diff (PR #68 adds no hex/rgb literals; only toasts and an existing button); both themes not visually checked. Met per reconcile: action in the root-object header, graph refetch on success, disabled while in flight. Closed done.

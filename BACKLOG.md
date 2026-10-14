@@ -36,6 +36,7 @@ only when a human promotes them.
 | 2026-10-14 · M11 (/improve-cycle, incl. B1 close of W7/S49/S30/M18/S51) | 5 | 4 | 54 open · 1 in-review · 2 feedback |
 | 2026-10-14 · S58+S60 (/improve-cycle, B4 batch) | 0 | 2 (S62, S63) | 54 open · 3 in-review · 2 feedback |
 | 2026-10-14 · S59 (/improve-cycle) | 0 | 1 (S64) | 54 open · 4 in-review · 2 feedback |
+| 2026-10-14 · S54/S55 criteria decision (human-directed, records-only) | 2 | 0 | 52 open · 4 in-review · 2 feedback |
 
 ## ID taxonomy (mirrors the three standing goals)
 
@@ -63,7 +64,7 @@ an item reaches `done`, move its index line and detail entry to
 
 ## Index
 
-### Open (54)
+### Open (52)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
@@ -112,8 +113,6 @@ an item reaches `done`, move its index line and detail entry to
 | S50 | P2 | Measure sync: expose duration_ms + per-phase timing | — |
 | S52 | P2 | Concurrent TML export under the limiter | — |
 | S53 | P2 | Sync DB write path: WAL, per-page commits, executemany, _persist_column_map single txn + to_thread (Review Board) | — |
-| S54 | P1 | Resync one object's lineage — backend endpoint (Review Board) | — |
-| S55 | P2 | Resync lineage button in Relationships view | — |
 | S56 | P3 | Incremental table TML (Review Board; depends on W8, S28, S53) | — |
 | S57 | P2 | Stop-sync button (UI over existing DELETE /jobs/{id}/cancel) + cancel gaps: _ensure_metadata_cache wait loop and chained metadata job ignore cancel; QUEUED jobs only see cancel at first page | — |
 | W8 | P3 | Verify live: does LOGICAL_TABLE modified_at change on column/schema/connection edits; is sort_options MODIFIED pagination stable (/metadata/search has no modified-since filter) | — |
@@ -542,26 +541,6 @@ Biggest expected speed win, but only after S51. TML export loops in `build_colum
 Partly closes S26 and S29. SQLite runs without WAL, users/groups commit per row, metadata inserts are per-row ORM, and `_persist_column_map` deletes and inserts in separate commits on the event loop. Plan: `database.py` connect listener sets `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`; one `IN (page ids)` SELECT and one commit per page; executemany for `CachedMetadata`; `client.search_metadata` fetches two specs concurrently.
 
 **Acceptance criteria:** Every new connection has the WAL / `synchronous=NORMAL` / `busy_timeout=5000` PRAGMAs (asserted in a unit test); users/groups sync issues one `IN` SELECT and one commit per page, not per row (statement/commit count test); metadata persist uses executemany, and the two-spec concurrent `search_metadata` keeps its partial-error contract (`tests/unit/test_client_metadata_specs.py`, `test_client_pagination.py`); `_persist_column_map` delete+insert is one transaction run via `asyncio.to_thread`, and a crash injected between delete and insert leaves the previous rows intact; row sets identical in `tests/unit/test_sync_service.py`; `EXPLAIN QUERY PLAN` on a realistically sized DB is attached to the PR (Review Board).
-
-### S54 — Resync one object's lineage — backend endpoint (Review Board)
-
-`P1` · **open** · protected: no
-
-Lets an admin refresh lineage for one liveboard, answer, model or table instead of a full rebuild. `lineage_service.resync_object(cluster_id, org_id, guid, force=True)` runs on the interactive lane, resolves type from `CachedMetadata`, and runs one transaction per object with every written row `synced_at=None` so the global watermark never moves. Endpoint `POST /relationships/objects/{guid}/resync?force=true&cluster_id=&org_id=`. Refactors `_index_sources` and `_parse_liveboard` out of `build_column_map`. Cache-only, so no dry-run, audit or registry change.
-
-**Acceptance criteria:** The endpoint returns the per-object status synchronously; it returns 409 for an in-flight `sync:dependencies` job, a same-guid resync in flight, or fan-out over 50 objects ("run full sync"), covered in `tests/unit/test_lineage_resync.py` and `tests/integration/test_relationships_api.py`; resyncing a liveboard, answer, model or table replaces only that object's rows per the plan's type table, and matches a full build for that object; a failed own export (or stub) writes nothing and returns `status="export_failed"` with old rows kept, and a failed model source skips only that model; the watermark and certified set are unchanged (S6/S7 rules); full `build_column_map` output stays identical after the refactor (S27 test, `tests/unit/test_lineage_columns.py`); `EXPLAIN QUERY PLAN` on a realistically sized DB is attached (Review Board).
-
-**Reopened 2026-10-14 (reconcile).** PR #67 merged, but the criteria are only partly met on main. Met: `export_failed` keeps old rows and writes nothing; 409 on an in-flight `dependencies` sync; 404/422 mappings. Unmet: 409 for a same-guid resync in flight and for fan-out over 50 objects; the `force` query param; table support (the service refuses tables with `ResyncUnsupportedError` -> 422); no `EXPLAIN QUERY PLAN` attached. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
-
-### S55 — Resync lineage button in Relationships view
-
-`P2` · **open** · protected: no
-
-UI over S54. A "Re-sync lineage" (force) action in the root-object header of `frontend/components/Relationships/RelationshipsView.tsx`, `relationshipsApi.resyncObject` in `frontend/lib/api.ts`, graph refetch after success, and an optional node action in `LineageFlow.tsx`.
-
-**Acceptance criteria:** `relationshipsApi.resyncObject` calls the S54 endpoint with `force=true`; the action sits in the root-object header and the graph refetches on success; a loading state (disabled button) shows while in flight, and a 409 or network error shows an inline error state; `export_failed` is shown plainly while the existing graph stays visible; only DESIGN.md tokens are used and both themes are checked; `npx tsc --noEmit` and `npm run build` pass.
-
-**Reopened 2026-10-14 (reconcile).** PR #68 merged, but the criteria are only partly met on main. Unmet: `resyncObject` sends no `force=true` (the backend has no `force` param); errors surface as a toast, not an inline error state; both-themes / tokens-only unverified. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
 
 ### S56 — Incremental table TML (Review Board; depends on W8, S28, S53)
 
