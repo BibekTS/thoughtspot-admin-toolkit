@@ -1004,8 +1004,16 @@ passing the full five-gate bar. The generalisable lessons:
 ## Degraded-but-COMPLETE sync signal (M11, 2026-10-14, improve/M11-degraded-sync-visible)
 
 - `Job.result["warnings"]: list[str]` is the generic degraded-but-COMPLETE channel. Set only when non-empty. PARTIAL still means cancelled, not degraded. The frontend reads it only via `jobWarnings()` in `frontend/lib/utils.ts` (WARNINGS pill in the Jobs UI + a warning toast).
-- `build_column_map(..., skipped=list)` takes an out-param list that the caller turns into warnings. `failed_exports` is a shared result key (answer index sets it too, but emits no warning: S60).
+- `build_column_map(..., skipped=list)` takes an out-param list that the caller turns into warnings. `failed_exports` is a result key set by two different jobs: the `dependencies` sync (column map) and the `lineage_deep_index` job (answer index, which now also emits a warning: S60).
 - The column-map pass in `sync_service.py` (~:930) is still a blanket swallow (M16). Any fake of `build_column_map` in tests must accept `**_` or `skipped`; a wrong signature raises `TypeError`, which the swallow turns into a degraded run instead of a failure.
 - `Toast` has a `warning` kind with no action button.
 - The Topbar sync label comes from `SyncLog`, not from the job, so job warnings never reach it (a degraded lineage write keeps SyncLog status SUCCESS: S59).
 - `--warn` / `--warn-soft` text contrast is 2.76:1 / 3.06:1 in the light theme, below the DESIGN.md 4.5:1 bar (S58).
+
+## Warn-text token and deep-index warnings (S58/S60, 2026-10-14, improve/S58-S60-warn-token-answer-index-warnings)
+
+- `--warn-text` (theme.css, both theme blocks; `warnText` in tokens.ts) is the AA-safe TEXT colour on warn surfaces (light #855500, dark #e0b25a). Keep `warn` for fill/border/icon only. ~20 sites still use warn as text (S62).
+- Guard: `frontend/lib/theme/contrast.test.ts`. It uses a cwd-relative `readFileSync` because vitest runs from `frontend/` and jsdom breaks `import.meta.url` file URLs.
+- The `prefers-contrast` block only overrides `--border` / `--text-muted`, not warn tokens.
+- `build_answer_index` runs only in the `lineage_deep_index` job (`run_deep_index`), not the dependencies sync, and now sets `result["warnings"]` when exports failed.
+- An answer whose export failed and that is certified+unmodified is not retried by the incremental deep index, so that warning is the only signal. `RelationshipsView.runDeepIndex` does not poll the job, so it never toasts (S63).

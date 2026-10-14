@@ -258,7 +258,7 @@ button { font-family: inherit; }
 }
 .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status[data-state="idle"]       { color: var(--text-muted); background: var(--surface-3); }
-.status[data-state="connecting"] { color: var(--warn-text);    background: var(--warn-soft);    border: 1px solid var(--warn-border); }
+.status[data-state="connecting"] { color: var(--warn-text); background: var(--warn-soft); border: 1px solid var(--warn-border); }
 .status[data-state="ok"]         { color: var(--success); background: var(--success-soft); border: 1px solid var(--success-border); }
 .status[data-state="error"]      { color: var(--danger);  background: var(--danger-soft);  border: 1px solid var(--danger-border); }
 .status[data-state="connecting"]::before { animation: status-pulse 1s ease-in-out infinite; }

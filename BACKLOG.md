@@ -34,6 +34,7 @@ only when a human promotes them.
 | 2026-09-16 · M10 (fix cycle, incl. B1 close of M5) | 1 | 2 | 46 open · 1 in-review · 2 feedback |
 | 2026-10-02 · /improve-cycle 3 (W7, S49, S30; M18 blocked; incl. B1 close of M10) | 1 | 1 | 44 open · 3 in-review · 2 feedback |
 | 2026-10-14 · M11 (/improve-cycle, incl. B1 close of W7/S49/S30/M18/S51) | 5 | 4 | 54 open · 1 in-review · 2 feedback |
+| 2026-10-14 · S58+S60 (/improve-cycle, B4 batch) | 0 | 2 (S62, S63) | 54 open · 3 in-review · 2 feedback |
 
 ## ID taxonomy (mirrors the three standing goals)
 
@@ -115,16 +116,18 @@ an item reaches `done`, move its index line and detail entry to
 | S56 | P3 | Incremental table TML (Review Board; depends on W8, S28, S53) | — |
 | S57 | P2 | Stop-sync button (UI over existing DELETE /jobs/{id}/cancel) + cancel gaps: _ensure_metadata_cache wait loop and chained metadata job ignore cancel; QUEUED jobs only see cancel at first page | — |
 | W8 | P3 | Verify live: does LOGICAL_TABLE modified_at change on column/schema/connection edits; is sort_options MODIFIED pagination stable (/metadata/search has no modified-since filter) | — |
-| S58 | P3 | Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme) | — |
 | S59 | P3 | Topbar should show degraded lineage | — |
-| S60 | P3 | build_answer_index skips answers without surfacing a warning | — |
 | S61 | P3 | Zero-output detector for a column pass that raises nothing | — |
+| S62 | P3 | Sweep remaining warn-as-text sites to `--warn-text` | — |
+| S63 | P4 | RelationshipsView.runDeepIndex does not poll the deep-index job, so its warnings never toast | — |
 
-### In review (1)
+### In review (3)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
 | M11 | P2 | A silently-degraded best-effort pass reports success at every level | — |
+| S58 | P3 | Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme) | — |
+| S60 | P3 | build_answer_index skips answers without surfacing a warning | — |
 
 ### Done
 
@@ -582,14 +585,6 @@ No code. Decides whether S56 can use `modified_at` as its changed-set signal. `/
 
 **Acceptance criteria:** On a live cluster, a column, schema or connection edit on a test LOGICAL_TABLE is made and the result (does `modified_at` change?) is recorded in `docs/org-memory/codebase.md` with the cluster version; `sort_options: MODIFIED` pagination is checked across at least two pages with a mid-crawl edit, and any duplicate or missed object is recorded; the modified-since filter absence is confirmed on the tested version; if `modified_at` does not change on those edits, the S56 row is updated to use a different signal before S56 starts.
 
-### S58 — Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme)
-
-`P3` · **open** · protected: no
-
-`--warn` / `--warn-soft` text measures 2.76:1 / 3.06:1 in the light theme, failing the DESIGN.md 4.5:1 text contrast bar. Affects the PARTIAL pill and the Topbar connecting status; the M11 WARNINGS pill would inherit it. Filed 2026-10-14 against main (M11 cycle).
-
-**Acceptance criteria:** A new `--warn-text` token reaches 4.5:1 on `warn-soft` and on the surface in BOTH themes, and is used by the PARTIAL pill, the WARNINGS pill and the Topbar connecting status; contrast ratios are recorded in the PR; `npx tsc --noEmit` and `npm run build` pass.
-
 ### S59 — Topbar should show degraded lineage
 
 `P3` · **open** · protected: no
@@ -598,14 +593,6 @@ The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCC
 
 **Acceptance criteria:** A SyncLog with status SUCCESS and a non-empty `error` renders a distinct degraded label/color in the Topbar (covered in the Topbar label test); the SUCCESS-gated consumers `sync_status.py` and `RelationshipsView` `lineageBuilt` are audited and each either handles the degraded case or is documented as correct; both themes checked.
 
-### S60 — build_answer_index skips answers without surfacing a warning
-
-`P3` · **open** · protected: no
-
-`build_answer_index` sets `failed_exports` but no `result["warnings"]`, so skipped answers read as a clean COMPLETE (the M11 channel only covers the column-map pass). Filed 2026-10-14 against main (M11 cycle).
-
-**Acceptance criteria:** A dependencies sync in which `build_answer_index` skipped answers because their export failed completes with `result["warnings"]` naming the count; a unit test drives a failing export and asserts the warning; a clean run sets no `warnings` key.
-
 ### S61 — Zero-output detector for a column pass that raises nothing
 
 `P3` · **open** · protected: no
@@ -613,6 +600,22 @@ The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCC
 A column pass can produce 0 columns / 0 CONNECTS without raising (the M11 shape without the exception). Needs a base rate to avoid false positives on clusters with no models or CSV-only tables. Filed 2026-10-14 against main (M11 cycle).
 
 **Acceptance criteria:** A dependencies sync whose column pass yields 0 columns/0 CONNECTS while the cache holds eligible models/tables surfaces a `result["warnings"]` entry; clusters with no models, or only CSV-backed tables, do not warn (tests for both); the base-rate rule is stated in the PR.
+
+### S62 — Sweep remaining warn-as-text sites to `--warn-text`
+
+`P3` · **open** · protected: no
+
+S58 added `--warn-text` but applied it only to the PARTIAL/WARNINGS pills, the connecting status and the Topbar stale-sync colour. About 20 other sites still use `theme.color.warn` / `var(--warn)` as a TEXT colour on warn-soft or the surface and fail 4.5:1 in the light theme. Filed 2026-10-14 (S58 cycle).
+
+**Acceptance criteria:** Every site that uses `theme.color.warn` / `var(--warn)` as a TEXT colour on warn-soft/surface moves to `warnText`: Sharing/HistoryTab.tsx:13, Users/HistoryTab.tsx:20, pages/dashboard.tsx:116, Sharing/PreviewTable.tsx:16, Deleter/columns.ts:29,31, MetadataGrid/columns.ts:16,49, Deleter/DryRunModal.tsx:209,526, Users/DeleteUsersModal.tsx:197-223, DeleterIntake/DependentsDrawer.tsx:135, Sharing/ShareModal.tsx:218, Users/TransferSharingModal.tsx:157, Relationships/RelationshipsView.tsx:443. Fill/border/icon/accent uses stay on `warn`: Toast.tsx:41, nodeStyles.ts:30, deleter.tsx:535, TransferOwnershipModal.tsx:580. PARTIAL chips render the same colour in the Jobs and History tabs; both themes verified; `contrast.test.ts` is extended or a grep-guard added so new warn-as-text uses are caught.
+
+### S63 — RelationshipsView.runDeepIndex does not poll the deep-index job
+
+`P4` · **open** · protected: no
+
+`RelationshipsView.runDeepIndex` fires the `lineage_deep_index` job without polling it, so the S60 `result["warnings"]` (and failures) never reach a toast. Filed 2026-10-14 (S58+S60 cycle).
+
+**Acceptance criteria:** After starting a deep index from the Relationships view, the job is polled to a terminal state and a COMPLETE job with `result["warnings"]` raises the warning toast (same channel as the M11 dependencies toast); covered by a test.
 
 ## In review
 
@@ -640,6 +643,26 @@ A best-effort pass that fails silently reports success at every level, and no ga
 **Acceptance criteria:** Either a gate or a guard test makes a silently-degraded sync detectable: a `dependencies` sync whose column pass fails does not present as a clean COMPLETE in the Jobs UI, and the org's test conventions require best-effort passes to be exercised against a failing dependency, not only a happy-path fake
 
 **2026-10-14 (`/improve-cycle M11`).** Implemented on `improve/M11-degraded-sync-visible` (commits `aee8d27`, `2c3fb10`): signal = `result["warnings"]` on COMPLETE `dependencies` jobs + a WARNINGS pill in the Jobs UI + a warning toast. Criteria met per the Review Board.
+
+### S58 — Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme)
+
+`P3` · **in-review** · protected: no
+
+`--warn` / `--warn-soft` text measures 2.76:1 / 3.06:1 in the light theme, failing the DESIGN.md 4.5:1 text contrast bar. Affects the PARTIAL pill and the Topbar connecting status; the M11 WARNINGS pill would inherit it. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A new `--warn-text` token reaches 4.5:1 on `warn-soft` and on the surface in BOTH themes, and is used by the PARTIAL pill, the WARNINGS pill and the Topbar connecting status; contrast ratios are recorded in the PR; `npx tsc --noEmit` and `npm run build` pass.
+
+**2026-10-14 (`/improve-cycle`, B4 batch).** Implemented on `improve/S58-S60-warn-token-answer-index-warnings` (`7b5d6b3`). `--warn-text`: light `#855500` (5.75:1 on warn-soft, 6.37:1 on surface), dark `#e0b25a` (7.82:1 / 8.86:1). Applied to the PARTIAL pill and WARNINGS pill (JobsList), `.status[data-state=connecting]`, and the Topbar stale-sync colour (beyond the named criteria, same bug). Guard test: `frontend/lib/theme/contrast.test.ts`. About 20 other warn-as-text sites deliberately NOT swept: see S62.
+
+### S60 — build_answer_index skips answers without surfacing a warning
+
+`P3` · **in-review** · protected: no
+
+`build_answer_index` sets `failed_exports` but no `result["warnings"]`, so skipped answers read as a clean COMPLETE (the M11 channel only covers the column-map pass). Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A dependencies sync in which `build_answer_index` skipped answers because their export failed completes with `result["warnings"]` naming the count; a unit test drives a failing export and asserts the warning; a clean run sets no `warnings` key.
+
+**2026-10-14 (`/improve-cycle`, B4 batch).** Implemented on `improve/S58-S60-warn-token-answer-index-warnings` (`7b5d6b3`). BUT the criteria say 'dependencies sync' while `build_answer_index` only runs in the `lineage_deep_index` job (`run_deep_index`), so the behaviour is implemented on the deep-index job; the criteria wording needs a human edit. `RelationshipsView.runDeepIndex` does not poll the job, so no toast (not in scope; see S63).
 
 ### F2 — Connection + external db/schema/table on the table list and in lineage
 
