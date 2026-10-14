@@ -112,7 +112,7 @@ export default function Topbar({
         <>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 96, flexShrink: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: syncColor }} />
+              <div style={{ width: 6, height: 6, flexShrink: 0, borderRadius: "50%", background: syncColor }} />
               <span
                 title={syncLabel}
                 style={{
