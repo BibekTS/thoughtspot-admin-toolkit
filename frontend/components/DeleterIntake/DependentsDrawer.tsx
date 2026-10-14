@@ -53,8 +53,12 @@ export default function DependentsDrawer({ object, clusterId, orgId, onClose, on
 
   if (!object) return null;
 
-  const total = response?.items.length ?? 0;
-  const byTypeEntries = response ? Object.entries(response.by_type) : [];
+  // `items` includes the root itself (listed first); `total` counts only its dependents.
+  const dependents = response?.items.filter((i) => i.ts_guid !== object.ts_guid) ?? [];
+  const total = dependents.length;
+  const byType: Record<string, number> = {};
+  for (const d of dependents) byType[d.object_type] = (byType[d.object_type] ?? 0) + 1;
+  const byTypeEntries = Object.entries(byType);
 
   return (
     <>
@@ -157,7 +161,7 @@ export default function DependentsDrawer({ object, clusterId, orgId, onClose, on
               )}
 
               {/* Items list */}
-              {response.items.length > 0 && (
+              {dependents.length > 0 && (
                 <div style={{
                   fontSize: 11, fontWeight: 600, color: theme.color.textMuted,
                   textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8,
@@ -166,7 +170,7 @@ export default function DependentsDrawer({ object, clusterId, orgId, onClose, on
                 </div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {response.items.map((item) => (
+                {dependents.map((item) => (
                   <div key={item.ts_guid} style={{
                     display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
                     background: theme.color.surface, border: `1px solid ${theme.color.border}`, borderRadius: 6,
@@ -202,7 +206,7 @@ export default function DependentsDrawer({ object, clusterId, orgId, onClose, on
             display: "flex", alignItems: "center", gap: 10,
           }}>
             <span style={{ fontSize: 12, color: theme.color.textMuted }}>
-              {total + 1} total object{total === 0 ? "" : "s"} would be deleted
+              {response.items.length} total object{response.items.length === 1 ? "" : "s"} would be deleted
             </span>
             <div style={{ flex: 1 }} />
             <button onClick={onClose} style={{
