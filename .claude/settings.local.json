@@ -3,7 +3,26 @@
     "allow": [
       "Skill(update-config)",
       "Skill(update-config:*)",
-      "Bash(*)"
+      "Bash(*)",
+      "Read(//Users/bibekshrestha/.claude/**)",
+      "Bash(git -C .claude/worktrees/agent-aaca8649e5a735629 status -sb)",
+      "Bash(git -C .claude/worktrees/agent-aaca8649e5a735629 log --oneline -1)",
+      "Bash(../../../.venv/bin/python -m pytest tests/unit/test_gate_evidence_hook.py -q)",
+      "Bash(../../../.venv/bin/ruff check *)",
+      "Bash(../../../.venv/bin/ruff format *)",
+      "Bash(../../../.venv/bin/python -m pytest tests/unit tests/integration -q)",
+      "Bash(git switch *)",
+      "Bash(git worktree *)",
+      "Bash(\"/Users/bibekshrestha/TS Projects/Admin_tookit/.venv/bin/ruff\" check .claude/hooks/)",
+      "Bash(gh pr *)",
+      "Bash(git fetch *)",
+      "Bash(git push *)",
+      "Bash(git diff *)",
+      "Bash(awk '/^release:/,/^$/' Makefile)",
+      "Bash(gh release *)",
+      "Bash(/private/tmp/claude-501/-Users-bibekshrestha-TS-Projects-Admin-tookit/bd21f438-8f59-4014-b254-aecb9e5540b6/scratchpad/wheelcheck/bin/ts-admin-toolkit serve *)",
+      "Bash(lsof -nP -iTCP -sTCP:LISTEN)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8080/health)"
     ]
   }
 }

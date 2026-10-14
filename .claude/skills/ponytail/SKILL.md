@@ -22,8 +22,8 @@ license: MIT
 ## How THIS repo applies it (read first)
 
 Vendored from the user-level `ponytail` skill (MIT, `LICENSE` alongside),
-unmodified below this section, so department agents — which have no `Skill`
-tool — can read it by path. This preamble says how it binds here.
+unmodified below this section. Department agents load it with the `Skill`
+tool, or read it by path when that tool is unavailable. This preamble says how it binds here.
 
 **Binding — who uses what:**
 
