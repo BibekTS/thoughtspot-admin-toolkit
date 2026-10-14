@@ -279,12 +279,9 @@ original — the test then silently exercises the real handler. Measured: hoisti
 `run_sync`'s handler dict to a constant broke 4 tests this way. Dispatch tables
 that tests patch must be built per call (`sync_service.sync_handlers()`).
 
-**5. It never exercises a failing dependency.** A best-effort pass (one whose
-errors are deliberately swallowed so the rest of the job survives) is only
-tested honestly by a case where its dependency fails: assert the failure is
-visible in the job result (`result["warnings"]`), not merely that the job still
-completes. Fakes standing in for it must accept any new keyword the caller
-passes (`**_`), and a clean run must assert no warning is present.
+**5. It never exercises a failing dependency.** A best-effort pass is only
+tested honestly against a failing dependency: assert `result["warnings"]` is
+set, and that a clean run has none.
 
 ## Refusals on a 202 endpoint (S23 / M10)
 

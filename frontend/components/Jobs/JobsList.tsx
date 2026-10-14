@@ -139,7 +139,13 @@ function buildJobColumns(onShowDetails: (job: Job) => void): ColDef<Job>[] {
       const warnings = job && !p.value ? jobWarnings(job) : [];
       if (warnings.length) {
         return (
-          <span title={warnings.join("\n")} style={{ color: theme.color.warn, fontSize: 12, fontFamily: theme.font.sans }}>
+          <span
+            title={warnings.join("\n")}
+            style={{
+              display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              color: theme.color.textSecondary, fontSize: 12, fontFamily: theme.font.sans,
+            }}
+          >
             {warnings[0]}{warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}
           </span>
         );

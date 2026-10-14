@@ -427,6 +427,7 @@ async def test_dependencies_sync_backfills_content_connections(monkeypatch, in_m
     async def _fake_object_graph(*, cluster_id, org_id, job_id, finalize=True):
         return 2
 
+    # **_: fakes must accept new keywords the caller passes (e.g. `skipped`).
     async def _fake_column_map(*, cluster_id, org_id, job_id, **_):
         return 1
 
