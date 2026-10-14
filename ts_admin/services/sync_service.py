@@ -951,6 +951,8 @@ async def _sync_dependencies(*, org_id: int, job_id: str, target_cluster_id: str
         warnings.append(f"{len(skipped)} object(s) failed TML export and were skipped")
     if warnings:
         result["warnings"] = warnings
+        # Topbar reads this as "lineage incomplete"; phase 1's next write clears it.
+        lineage_service.mark_dependencies_degraded(cluster_id, org_id, "; ".join(warnings)[:500])
     if cancelled:
         # The object tier IS committed and its SyncLog written — only the column
         # enrichment was dropped. That is a genuine partial result, not a failure.

@@ -253,6 +253,7 @@ export function RelationshipsView({
   }, [clusterId, orgId, toast]);
 
   const items = topology ? topology[tab] : [];
+  // Intentionally independent of phase-2 degradation (SUCCESS + error): the object graph is usable.
   const lineageBuilt = depStatus === "SUCCESS";
 
   if (topoError) {

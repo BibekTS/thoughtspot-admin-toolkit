@@ -464,6 +464,7 @@ def _write_dependencies_sync_log(cluster_id: str, org_id: int, *, record_count: 
             existing.synced_at = datetime.now(timezone.utc)
             existing.record_count = record_count
             existing.status = "SUCCESS"
+            # The ONLY clearer of a phase-2 degraded marker (see mark_dependencies_degraded).
             existing.error = None
             session.add(existing)
         else:
@@ -477,6 +478,35 @@ def _write_dependencies_sync_log(cluster_id: str, org_id: int, *, record_count: 
                 )
             )
         session.commit()
+
+
+def mark_dependencies_degraded(cluster_id: str, org_id: int, error: str) -> None:
+    """
+    Stamp a phase-2 degradation note on the 'dependencies' SyncLog row.
+
+    Touches ONLY `error`: status stays SUCCESS (the object graph is good) and
+    synced_at/duration_ms stay phase 1's. Best-effort: a write failure is logged,
+    never allowed to flip a good job or graph to FAILED.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from ts_admin.models.sync_log import SyncLog
+
+    try:
+        with get_session() as session:
+            row = session.exec(
+                select(SyncLog).where(
+                    SyncLog.cluster_id == cluster_id,
+                    SyncLog.org_id == org_id,
+                    SyncLog.entity_type == "dependencies",
+                )
+            ).first()
+            if row:
+                row.error = error
+                session.add(row)
+                session.commit()
+    except SQLAlchemyError as exc:
+        logger.warning("Could not record lineage degradation marker: %s", exc)
 
 
 # ── BUILD: Phase 2 column map + connection / liveboard edges (TML) ──────────────

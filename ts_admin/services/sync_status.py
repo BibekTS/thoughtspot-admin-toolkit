@@ -25,6 +25,9 @@ Callers pick one of two postures:
   stay usable and just tell the UI the data may be partial.
 """
 
+# Note: only the "metadata" row is read here, so a degraded "dependencies" row
+# (SUCCESS + error, S59) is not a blind spot.
+
 from __future__ import annotations
 
 from sqlmodel import Session, col, select
