@@ -33,6 +33,7 @@ only when a human promotes them.
 | 2026-09-10 · M5 (fix cycle) | 0 | 1 | 45 open · 1 in-review · 2 feedback |
 | 2026-09-16 · M10 (fix cycle, incl. B1 close of M5) | 1 | 2 | 46 open · 1 in-review · 2 feedback |
 | 2026-10-02 · /improve-cycle 3 (W7, S49, S30; M18 blocked; incl. B1 close of M10) | 1 | 1 | 44 open · 3 in-review · 2 feedback |
+| 2026-10-14 · M11 (/improve-cycle, incl. B1 close of W7/S49/S30/M18/S51) | 5 | 4 | 54 open · 1 in-review · 2 feedback |
 
 ## ID taxonomy (mirrors the three standing goals)
 
@@ -60,13 +61,12 @@ an item reaches `done`, move its index line and detail entry to
 
 ## Index
 
-### Open (44)
+### Open (54)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
 | M8 | P2 | Gate serialization violated by file writes into the shared checkout | yes (`CLAUDE.md`) |
 | M2 | P2 | PR #14 silently reverted the vitest wiring | yes (`.github/workflows/*` for the CI half) |
-| M11 | P2 | A silently-degraded best-effort pass reports success at every level | — |
 | M12 | P2 | Frontend vitest executes on zero automated entry points | yes (`.github/workflows/*`, `CLAUDE.md`) |
 | M13 | P2 | Library-contract blindness: dead grid sorting graded 'clean' twice | — |
 | M15 | P2 | READ_ENDPOINTS cannot register a non-JSON (CSV) read endpoint | yes (`tests/integration/test_cluster_isolation.py`) |
@@ -105,11 +105,9 @@ an item reaches `done`, move its index line and detail entry to
 | W4 | P3 | permission_type silently ignored below 10.3 (DEFINED vs EFFECTIVE) | — |
 | W5 | P3 | metadata/search paginated outside the documented contract | — |
 | M16 | P3 | Blanket except Exception survives the BLE gate: keyring residue + column-map site | yes (`ts_admin/config.py`, `ts_admin/main.py`) |
-| M18 | P2 | Gate-evidence hook captures nothing for gates run in the worktrees M8 mandates | — |
 | M17 | P3 | Performance-review lens doesn't name EXPLAIN QUERY PLAN/correlated-subquery as a checklist item | — |
 | M1 | P4 | Single-source the protected-path list | yes (`.github/workflows/*`, `CLAUDE.md`) |
 | S50 | P2 | Measure sync: expose duration_ms + per-phase timing | — |
-| S51 | P1 | Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409) | — |
 | S52 | P2 | Concurrent TML export under the limiter | — |
 | S53 | P2 | Sync DB write path: WAL, per-page commits, executemany, _persist_column_map single txn + to_thread (Review Board) | — |
 | S54 | P1 | Resync one object's lineage — backend endpoint (Review Board) | — |
@@ -117,14 +115,16 @@ an item reaches `done`, move its index line and detail entry to
 | S56 | P3 | Incremental table TML (Review Board; depends on W8, S28, S53) | — |
 | S57 | P2 | Stop-sync button (UI over existing DELETE /jobs/{id}/cancel) + cancel gaps: _ensure_metadata_cache wait loop and chained metadata job ignore cancel; QUEUED jobs only see cancel at first page | — |
 | W8 | P3 | Verify live: does LOGICAL_TABLE modified_at change on column/schema/connection edits; is sort_options MODIFIED pagination stable (/metadata/search has no modified-since filter) | — |
+| S58 | P3 | Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme) | — |
+| S59 | P3 | Topbar should show degraded lineage | — |
+| S60 | P3 | build_answer_index skips answers without surfacing a warning | — |
+| S61 | P3 | Zero-output detector for a column pass that raises nothing | — |
 
-### In review (3)
+### In review (1)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
-| W7 | P1 | sqlmodel ≥0.0.45 rejects naive datetimes — every fresh install crashes on cache queries | — |
-| S49 | P2 | Background targets strand jobs on non-refusal exceptions (pre-mark_running windows) | — |
-| S30 | P2 | build_answer_index incremental predicates have zero mutation coverage | — |
+| M11 | P2 | A silently-degraded best-effort pass reports success at every level | — |
 
 ### Done
 
@@ -151,14 +151,6 @@ Ordered by priority, then ID.
 Gate serialization is violated in practice by **file writes**, not just ports: during the S7 review, reviewer/QA agents wrote five scratch repro files into `tests/unit/` of the **shared** checkout, flipping `pytest tests/unit/` from green to red mid-verification and making QA's gate result untrustworthy. CLAUDE.md serializes port-bound gates but says nothing about agents writing into the working tree they share
 
 **Acceptance criteria:** The agent briefs (and CLAUDE.md's gate-serialization note) require review/QA repro artifacts to live in a `git worktree` or the scratchpad, never in `tests/` of the shared checkout; QA reports the working tree state it observed so a polluted run is visible rather than silent
-
-### M11 — A silently-degraded best-effort pass reports success at every level
-
-`P2` · **open** · protected: no
-
-A best-effort pass that fails silently reports success at every level, and no gate catches it. `_sync_dependencies` swallows the column-map failure by design (the object tier must survive), so on a cluster where the TML pass aborted every time the job read COMPLETE, the Topbar read "Synced 2m ago", and the cache held 9,247 USES edges with **zero** CONNECTS and zero column rows. The full verification bar was green throughout — unit tests exercise the pass against canned TML that never fails, so the all-or-nothing batch flaw and the Model-alias parse gap were both invisible. Partially addressed (`column_error` now rides in the job result), but nothing asserts a degraded pass is visible to the user
-
-**Acceptance criteria:** Either a gate or a guard test makes a silently-degraded sync detectable: a `dependencies` sync whose column pass fails does not present as a clean COMPLETE in the Jobs UI, and the org's test conventions require best-effort passes to be exercised against a failing dependency, not only a happy-path fake
 
 ### M12 — Frontend vitest executes on zero automated entry points
 
@@ -217,14 +209,6 @@ The liveboard incremental watermark is a bare timestamp, which cannot express "n
 `_persist_column_map` commits its DELETEs before inserting (`session.commit()` between the delete block and the insert loop), so a crash in that window — process kill, `serve` restart, sqlite lock timeout, or an S24 interleave — leaves a durably-empty scope. Today this self-heals only by accident, via `max(CachedColumnLineage.synced_at)` reading NULL; the rejected S7 diff removed that accident and made the loss permanent
 
 **Acceptance criteria:** The delete+repopulate in `_persist_column_map` is atomic (single transaction), or a crash in the window is detectable so the next build rebuilds the scope rather than trusting it; a test simulates a raise between the delete commit and the insert loop and asserts the following build restores the edges
-
-### S30 — build_answer_index incremental predicates have zero mutation coverage
-
-`P2` · **in-review** · protected: no
-
-`build_answer_index`'s `_changed` twin (`lineage_service.py:897`) is byte-identical to `build_column_map`'s but has **zero** mutation coverage: dropping its `last_built is None` disjunct leaves the entire 37-test lineage suite green, while the same mutation at `:559` is now killed by S27. Answer-index incrementality is unpinned, and `build_answer_index` carries the same watermark shape S7 was rejected over (`max(CachedColumnUsage.synced_at)` over *surviving* rows, so partial deletion is permanent)
-
-**Acceptance criteria:** The ANSWER tier's incremental predicates are each killed by at least one test — at minimum, dropping `last_built is None` or the `modified_at > last_built` comparison at `lineage_service.py:897` turns a test red; the mutations and results are appended to the table in [docs/dev/TESTING.md](docs/dev/TESTING.md)
 
 ### S37 — BearerTokenAuth silently discards org_id
 
@@ -307,6 +291,8 @@ A "spares X" guard test placed on a code path that full-rebuilds X is vacuous �
 Enabling BLE buys less than it appears: ruff BLE001 exempts ANY handler that re-raises or calls `logger.exception`, so all ~10 remaining blanket handlers in `ts_admin/` are silent under the new gate. That includes `ts_admin/services/sync_service.py:876` (the dependencies column-map pass), which the M14 review escalated — round 3 changed its `logger.warning` to `logger.exception`, which made it lint-clean WITHOUT narrowing it. It still swallows e.g. a `TypeError` from our own `build_column_map` into a `column_error` string while the job goes on to `mark_complete` — a COMPLETE dependencies sync with an empty column map. **A green BLE run is NOT evidence that blanket handlers were removed.**
 
 **Acceptance criteria:** `_delete_secret` names the exception classes it tolerates (`keyring.errors.KeyringError` / `PasswordDeleteError`), logs each failure with the key it could not delete, and surfaces a residue signal to the caller so cluster deletion can report "credentials may remain in the OS keychain" instead of silently succeeding; the `[tool.ruff.lint.per-file-ignores]` block in `pyproject.toml` is removed (or narrowed to a single `# noqa: BLE001` with a reason) so BLE001 is live on every file; a unit test stubs the keyring to raise and asserts the failure is reported, not swallowed; the `sync_service.py` column-map handler either names the exception classes it tolerates or its comment states exactly WHAT it is permitted to swallow (it currently argues only WHY it is blind), and the job does not report COMPLETE when the column tier is empty because of a swallowed error. Touches protected paths — needs the `human-approved` label.
+
+**2026-10-14 (M11 cycle).** The correctness lens flagged the blanket `except Exception` in the `dependencies` column-map pass (`sync_service.py` ~:930, was :876) again as an escalation. This row already covers it (criteria: name the tolerated exceptions or state what it may swallow). M11 made the swallowed failure visible as a job warning but did NOT narrow the handler; a fake `build_column_map` with the wrong signature still reads as a degraded run, not a crash.
 
 ### M17 — Performance-review lens doesn't name EXPLAIN QUERY PLAN/correlated-subquery as a checklist item
 
@@ -528,26 +514,6 @@ Every font size in `frontend/` is a hardcoded px integer and `body` in `frontend
 
 **Acceptance criteria:** The type ladder resolves through `rem` off a `:root` font-size that inherits the browser default; control heights and shell dimensions that must track the text scale with it (`em`/`rem`), and the ones that must not (grid row height, icon sizes) are explicitly documented as fixed in `docs/dev/DESIGN.md`; the app is legible and un-clipped at a 125% browser text setting in both themes, shown with a screenshot
 
-### S49 — Background targets strand jobs on non-refusal exceptions (pre-mark_running windows)
-
-`P2` · **in-review** · protected: no
-
-Found during the M10 research sweep of all 17 `background_tasks.add_task` sites. The S23 *refusal* class is closed, but three windows still strand a `Job` on a **non-refusal** exception (e.g. a local sqlite `OperationalError`), because they run outside the target's `try`. `bulk_sharing_service.py:758-799` runs outside any `try` **and before** `mark_running` at `:800`, so a failure there leaves the row at `QUEUED` / `error=None` — the exact S23 symptom from a different cause, with the UI polling forever. `user_management_service.py:590-658` and `:945-978` are outside their `try` but after `mark_running`, so they strand at `RUNNING`. The only recovery is `_recover_stuck_jobs` (`ts_admin/main.py:79-169`) at the next restart, which is also the delete-cache reconciler and must not be disturbed.
-
-**Acceptance criteria:** A non-refusal exception raised anywhere in a background target marks the job FAILED with the exception recorded, rather than leaving it `QUEUED`/`RUNNING` until a restart — i.e. the preamble before `mark_running` is inside the target's error handling. A test raises inside the `bulk_sharing_service.execute_share` preamble (before `mark_running`) and asserts the `Job` row ends FAILED with a non-null `error`; the non-vacuity twin asserts the same test fixture yields a normal SUCCESS/COMPLETE when nothing raises. `_recover_stuck_jobs` is left unchanged.
-
-### M18 — Gate-evidence hook captures nothing for gates run in the worktrees M8 mandates
-
-`P2` · **in-review** · protected: no
-
-Two org rules contradict each other. The `/improve-cycle` skill's QA BAR step says the `PostToolUse` hook (`.claude/hooks/gate_evidence.py`) appends every gate command and exit code to `.claude/evidence/<branch>.log`, and that **"a gate you cannot find in the log did not run in this cycle"** — the CEO is told to quote that file rather than an agent's recollection. But M8 requires review/QA agents to run gates in a **detached `git worktree`**, and the hook writes per-branch under the primary checkout, so it captured **zero** lines for the M10 cycle even though the full bar ran four times. Verified 2026-09-16: `.claude/evidence/` has no `improve__M10-background-refusal-rule.log` while QA reported a complete green bar. The effect is that the one anti-self-report mechanism the skill defines is silently inert for exactly the runs it was written to police, and a CEO following the rule literally would conclude no gate ran.
-
-**Acceptance criteria:** Gate runs executed inside a detached worktree land in the same evidence log as runs in the primary checkout (e.g. the hook resolves the log path from `git rev-parse --git-common-dir` / the worktree's branch rather than the cwd), OR the skill's QA BAR step is corrected to state that worktree runs are not captured and names what the CEO should quote instead. Proven by running one gate inside a detached worktree and showing the line appears in the expected log; the non-vacuity twin shows the log is empty for that branch beforehand.
-
-**2026-10-02 (`/improve-cycle 3`):** researched + planned (hook-only fix: log root from `git rev-parse --git-common-dir`, branch from `git branch --points-at HEAD` for detached worktrees, `detached-<sha>` fallback, leading-`cd` parsing; plan in branch improve/M18-worktree-evidence@0aec0fd notes). Implementation BLOCKED: the auto-mode permission classifier denies agent edits to `.claude/hooks/*` as Self-Modification. Needs a human to allow the edit or apply the patch. Every gate run this cycle (all in worktrees) again landed in no evidence log.
-
-**2026-10-02 (unblocked).** Human retried with auto mode off; the hook edit went through. Shipped in branch `improve/M18-worktree-evidence` (`c245dd9`, `323a976`): log root from `git rev-parse --git-common-dir`, detached-HEAD branch from `git branch --points-at HEAD` (`main` wins and is skipped; one other branch → it; else `detached-<sha>`; never `HEAD.log`), leading `cd X &&`, `cd X ;` and `cd X;` parsing, and `GATE` now matches quoted executables (`".../ruff" check`). Live check: a gate run in a detached worktree landed in the primary checkout's `improve__M18-worktree-evidence.log`, which did not exist beforehand. Review Board found one CONFIRMED misattribution (`cd X; gate`), fixed with a test.
-
 ### S50 — Measure sync: expose duration_ms + per-phase timing
 
 `P2` · **open** · protected: no
@@ -555,14 +521,6 @@ Two org rules contradict each other. The `/improve-cycle` skill's QA BAR step sa
 Baseline for the sync-performance phases (S51–S53). `duration_ms` already exists on `SyncLog` but is not exposed; the dependencies sync has no per-phase breakdown, and `build_column_map` does not report export volume, so speed-ups cannot be measured. Plan: `ts_admin/api/sync.py` `EntitySyncStatus`, `sync_service._sync_dependencies`, `lineage_service.build_column_map(stats=…)`.
 
 **Acceptance criteria:** `GET /api/v1/sync` returns `duration_ms` per entity from `SyncLog`, non-null after a completed sync and null while running (`tests/unit/test_sync_status.py`); the dependencies result carries `phase_ms` with object-tier, column-pass and derive keys, all non-negative; `build_column_map(stats=…)` reports export call count, objects exported, 429 count and ms split by tables vs liveboards, asserted on a fake client in `tests/unit/test_lineage_service.py`; calling with no `stats` leaves output unchanged.
-
-### S51 — Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409)
-
-`P1` · **open** · protected: no
-
-Gate for S52–S53. Sync fans out six jobs and lineage overlaps them, and `deep-index` has no in-flight guard, so parallelism without a shared limiter would hammer ThoughtSpot. New `ts_admin/ts_client/throttle.py` `ClusterLimiter(max_concurrent=6, interactive_reserve=2)` with a `lane("background")` ContextVar; slots are held in `ThoughtSpotClient._request`/`_do_request` around `self._http.request` only. `retry.py` parses `Retry-After` as int or HTTP-date (today a `ValueError`).
-
-**Acceptance criteria:** Peak in-flight requests per cluster never exceed 6 (fake-client test in `tests/unit/test_throttle.py`); background work cannot take the 2 interactive-reserved slots, so an interactive request acquires while background work saturates; a 429 pauses all lanes cluster-wide, asserted in `tests/unit/test_retry.py`; `Retry-After` as an integer or HTTP-date is honoured, capped at 60s with jitter, and no longer raises; backoff sleeps hold no slot; `POST /relationships/deep-index` returns 409 when one is already in flight (`job_service.find_in_flight(job_type, …)`, covered in `tests/integration/test_relationships_api.py`).
 
 ### S52 — Concurrent TML export under the limiter
 
@@ -588,6 +546,8 @@ Lets an admin refresh lineage for one liveboard, answer, model or table instead 
 
 **Acceptance criteria:** The endpoint returns the per-object status synchronously; it returns 409 for an in-flight `sync:dependencies` job, a same-guid resync in flight, or fan-out over 50 objects ("run full sync"), covered in `tests/unit/test_lineage_resync.py` and `tests/integration/test_relationships_api.py`; resyncing a liveboard, answer, model or table replaces only that object's rows per the plan's type table, and matches a full build for that object; a failed own export (or stub) writes nothing and returns `status="export_failed"` with old rows kept, and a failed model source skips only that model; the watermark and certified set are unchanged (S6/S7 rules); full `build_column_map` output stays identical after the refactor (S27 test, `tests/unit/test_lineage_columns.py`); `EXPLAIN QUERY PLAN` on a realistically sized DB is attached (Review Board).
 
+**Reopened 2026-10-14 (reconcile).** PR #67 merged, but the criteria are only partly met on main. Met: `export_failed` keeps old rows and writes nothing; 409 on an in-flight `dependencies` sync; 404/422 mappings. Unmet: 409 for a same-guid resync in flight and for fan-out over 50 objects; the `force` query param; table support (the service refuses tables with `ResyncUnsupportedError` -> 422); no `EXPLAIN QUERY PLAN` attached. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
+
 ### S55 — Resync lineage button in Relationships view
 
 `P2` · **open** · protected: no
@@ -595,6 +555,8 @@ Lets an admin refresh lineage for one liveboard, answer, model or table instead 
 UI over S54. A "Re-sync lineage" (force) action in the root-object header of `frontend/components/Relationships/RelationshipsView.tsx`, `relationshipsApi.resyncObject` in `frontend/lib/api.ts`, graph refetch after success, and an optional node action in `LineageFlow.tsx`.
 
 **Acceptance criteria:** `relationshipsApi.resyncObject` calls the S54 endpoint with `force=true`; the action sits in the root-object header and the graph refetches on success; a loading state (disabled button) shows while in flight, and a 409 or network error shows an inline error state; `export_failed` is shown plainly while the existing graph stays visible; only DESIGN.md tokens are used and both themes are checked; `npx tsc --noEmit` and `npm run build` pass.
+
+**Reopened 2026-10-14 (reconcile).** PR #68 merged, but the criteria are only partly met on main. Unmet: `resyncObject` sends no `force=true` (the backend has no `force` param); errors surface as a toast, not an inline error state; both-themes / tokens-only unverified. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
 
 ### S56 — Incremental table TML (Review Board; depends on W8, S28, S53)
 
@@ -620,45 +582,43 @@ No code. Decides whether S56 can use `modified_at` as its changed-set signal. `/
 
 **Acceptance criteria:** On a live cluster, a column, schema or connection edit on a test LOGICAL_TABLE is made and the result (does `modified_at` change?) is recorded in `docs/org-memory/codebase.md` with the cluster version; `sort_options: MODIFIED` pagination is checked across at least two pages with a mid-crawl edit, and any duplicate or missed object is recorded; the modified-since filter absence is confirmed on the tested version; if `modified_at` does not change on those edits, the S56 row is updated to use a different signal before S56 starts.
 
+### S58 — Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme)
+
+`P3` · **open** · protected: no
+
+`--warn` / `--warn-soft` text measures 2.76:1 / 3.06:1 in the light theme, failing the DESIGN.md 4.5:1 text contrast bar. Affects the PARTIAL pill and the Topbar connecting status; the M11 WARNINGS pill would inherit it. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A new `--warn-text` token reaches 4.5:1 on `warn-soft` and on the surface in BOTH themes, and is used by the PARTIAL pill, the WARNINGS pill and the Topbar connecting status; contrast ratios are recorded in the PR; `npx tsc --noEmit` and `npm run build` pass.
+
+### S59 — Topbar should show degraded lineage
+
+`P3` · **open** · protected: no
+
+The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCCESS; `buildSyncLabel` / `buildSyncColor` do not surface it, so a degraded lineage reads as 'Synced 2m ago'. Audit the SUCCESS-gated consumers (`sync_status.py`, `RelationshipsView` `lineageBuilt`) for the same blind spot. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A SyncLog with status SUCCESS and a non-empty `error` renders a distinct degraded label/color in the Topbar (covered in the Topbar label test); the SUCCESS-gated consumers `sync_status.py` and `RelationshipsView` `lineageBuilt` are audited and each either handles the degraded case or is documented as correct; both themes checked.
+
+### S60 — build_answer_index skips answers without surfacing a warning
+
+`P3` · **open** · protected: no
+
+`build_answer_index` sets `failed_exports` but no `result["warnings"]`, so skipped answers read as a clean COMPLETE (the M11 channel only covers the column-map pass). Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A dependencies sync in which `build_answer_index` skipped answers because their export failed completes with `result["warnings"]` naming the count; a unit test drives a failing export and asserts the warning; a clean run sets no `warnings` key.
+
+### S61 — Zero-output detector for a column pass that raises nothing
+
+`P3` · **open** · protected: no
+
+A column pass can produce 0 columns / 0 CONNECTS without raising (the M11 shape without the exception). Needs a base rate to avoid false positives on clusters with no models or CSV-only tables. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A dependencies sync whose column pass yields 0 columns/0 CONNECTS while the cache holds eligible models/tables surfaces a `result["warnings"]` entry; clusters with no models, or only CSV-backed tables, do not warn (tests for both); the base-rate rule is stated in the PR.
+
 ## In review
 
 _Rows sit here only while their PR is open; the
 next cycle's reconcile step moves merged rows to
 [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
-
-### W7 — sqlmodel ≥0.0.45 rejects naive datetimes — every fresh install crashes on cache queries
-
-`P1` · **in-review** · protected: no
-
-
-**Evidence (measured 2026-10-02, Python 3.12, fresh `pip install -e ".[dev]"`):**
-- `pyproject.toml:27` pins `sqlmodel>=0.0.19` (no upper bound, no lockfile).
-- CI's last run on main (2026-09-17) resolved sqlmodel 0.0.42 → green.
-- Bisect against `pytest tests/unit tests/integration`: 0.0.42 → 897 passed;
-  0.0.43, 0.0.44 → `test_metadata_api.py` 30 passed; 0.0.45, 0.0.46 → 4 failed there;
-  0.0.47 (today's latest) → **78 failed, 819 passed** on the full suite.
-- Every failure is the same: `sqlmodel/sql/sqltypes.py:34` raises
-  `ValueError: Datetime values must have timezone information` when a NAIVE
-  datetime is bound as a query parameter, e.g. `ts_metadata.last_accessed_at < ?`
-  in the metadata stats / archiver-candidate count queries (75 of 77 hits) and a
-  `modified_at < ?` variant (6).
-- Consequence for users: `pip install` today pulls 0.0.47, so the Metadata
-  stats endpoint and Archiver queries 500. CI on the next PR will go red too.
-
-**Acceptance criteria (draft, provisional until a human confirms):**
-1. `pytest tests/unit tests/integration` is green on the latest sqlmodel (0.0.47)
-   AND on the oldest version the pin allows.
-2. Fresh installs cannot resolve a sqlmodel that breaks the app: either the code
-   works on ≥0.0.45, or the pin excludes the breaking range — the PR states which
-   and why.
-3. If the code path is fixed (not only pinned): stored/compared datetimes have
-   one documented convention (naive-UTC vs aware-UTC) and a test drives a real
-   writer → reader round-trip under the new sqlmodel, not a hand-seeded row.
-4. No existing SQLite cache becomes unreadable: rows already written by the
-   prior version (naive values in SQLite) still compare correctly after upgrade.
-
-**2026-10-02.** Shipped in PR #61 (branch `improve/W7-sqlmodel-aware-datetimes`): a fix, not a pin; floor raised to `sqlmodel>=0.0.45`. Review Board CONFIRMED and fixed a `datetime.min` sort 500 in `deletion_service.dryrun_objects`. Criteria above remain provisional until a human confirms.
-
 
 ## Feedback (user-reported)
 
@@ -670,6 +630,16 @@ instead of getting its own work stream. Same bright-line rules as above.
 Batch 1 received 2026-08-24 (SE Demo evaluation). Triage 2026-08-24: none fully
 done; F3/F6/F11 partially covered or already filed.
 
+
+### M11 — A silently-degraded best-effort pass reports success at every level
+
+`P2` · **in-review** · protected: no
+
+A best-effort pass that fails silently reports success at every level, and no gate catches it. `_sync_dependencies` swallows the column-map failure by design (the object tier must survive), so on a cluster where the TML pass aborted every time the job read COMPLETE, the Topbar read "Synced 2m ago", and the cache held 9,247 USES edges with **zero** CONNECTS and zero column rows. The full verification bar was green throughout — unit tests exercise the pass against canned TML that never fails, so the all-or-nothing batch flaw and the Model-alias parse gap were both invisible. Partially addressed (`column_error` now rides in the job result), but nothing asserts a degraded pass is visible to the user
+
+**Acceptance criteria:** Either a gate or a guard test makes a silently-degraded sync detectable: a `dependencies` sync whose column pass fails does not present as a clean COMPLETE in the Jobs UI, and the org's test conventions require best-effort passes to be exercised against a failing dependency, not only a happy-path fake
+
+**2026-10-14 (`/improve-cycle M11`).** Implemented on `improve/M11-degraded-sync-visible` (commits `aee8d27`, `2c3fb10`): signal = `result["warnings"]` on COMPLETE `dependencies` jobs + a WARNINGS pill in the Jobs UI + a warning toast. Criteria met per the Review Board.
 
 ### F2 — Connection + external db/schema/table on the table list and in lineage
 
