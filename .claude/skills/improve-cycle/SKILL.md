@@ -40,12 +40,19 @@ habit. Delegate to save context; never to skip a gate.
   across several files goes to `researcher` / `Explore`, and you keep the
   conclusion. A lookup where you already know the file and symbol is one
   `grep`, not a spawn.
-- **Pick the model per desk.** Pass `model` on the `Agent` call. Use `sonnet`
-  for mechanical desks: `qa-verifier` (runs commands, reports verbatim),
-  `Explore` lookups, a `researcher` on a P3/P4 row, and the B1 reconcile
-  sweep. Keep the default model for `architect`, `implementer`, `bug-hunter`
-  and the correctness / security / regression lenses. Escalate a cheap desk to
-  the default model the moment its report is thin or contradicts another.
+- **Pick the model per desk.** Each agent's frontmatter sets its default
+  `model`; pass `model` on the `Agent` call only to override it.
+
+  | Desk | Default | Why |
+  |---|---|---|
+  | `qa-verifier` | `haiku` | runs commands, reports verbatim |
+  | `researcher`, `implementer` | `sonnet` | mapping and plan-following |
+  | `reviewer` | `sonnet` | simplicity and craft lenses; **pass `model: "opus"`** for correctness / security / regression / performance |
+  | `architect`, `bug-hunter` | `opus` | design and discovery judgment |
+  | `Explore` lookups, B1 reconcile sweep | pass `haiku` | mechanical |
+
+  Escalate a cheap desk one step (haiku → sonnet → opus) the moment its report
+  is thin or contradicts another. A `researcher` on a P0/P1 row gets `opus`.
 - **Brief by reference, not by paste.** Write the research brief and the
   approved plan to the scratchpad and hand agents the path plus the row ID.
   Lenses read `git diff main...HEAD` themselves; never paste a diff into six
@@ -70,9 +77,11 @@ habit. Delegate to save context; never to skip a gate.
 
 ## Skills the org uses
 
-Department agents have no `Skill` tool, so each skill they need is vendored
-under `.claude/skills/` with a "How THIS repo applies it" preamble that says
-which sections bind. Read the preamble first; it overrides the body.
+`architect`, `implementer` and `reviewer` load these with the `Skill` tool at
+the start of every dispatch (each agent's "Load these skills" section). Each is
+vendored under `.claude/skills/` with a "How THIS repo applies it" preamble
+that says which sections bind, so an agent without the `Skill` tool can read it
+by path. Read the preamble first; it overrides the body.
 
 | Skill | Who | Used for |
 |---|---|---|
@@ -195,7 +204,9 @@ independent items, use worktree-isolated implementers (one each).
 In ONE message, launch the **Review Board** (`reviewer` per lens —
 correctness / security / regression / performance / **simplicity**, plus
 **craft** whenever the diff touches `frontend/`, each told to REFUTE) **and**
-`qa-verifier` together. Also run `/code-review`,
+`qa-verifier` together. Pass `model: "opus"` on the correctness / security /
+regression / performance lenses; simplicity, craft and QA run on their
+frontmatter defaults (`sonnet`, `sonnet`, `haiku`). Also run `/code-review`,
 `/security-review` and `/ponytail-review` on the diff. Fix every **CONFIRMED**
 finding (re-dispatch the same `implementer` via `SendMessage`), then **re-run QA** — a diff that changed
 after verification is unverified.
