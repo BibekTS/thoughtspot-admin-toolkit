@@ -562,3 +562,48 @@ async def test_deep_index_is_scoped_to_one_cluster_and_org(
     assert _job_result(in_memory_db, job_id)["answers_total"] == len(ALL_ANSWERS)
     after = {s: _shadow_snapshot(in_memory_db, cluster_id=s[0], org_id=s[1]) for s in SHADOW_SCOPES}
     assert after == before
+
+
+class _PoisonAnswerClient(_AnswerTMLClient):
+    """Fails any export batch containing `poison`, like the real 500."""
+
+    def __init__(self, poison: str):
+        super().__init__()
+        self.poison = poison
+
+    async def tml_export(self, *, object_ids, edoc_format=None):
+        from ts_admin.ts_client.exceptions import TSServerError
+
+        if self.poison in object_ids:
+            raise TSServerError(status_code=500, body='{"error":{"debug":["No value present"]}}')
+        return await super().tml_export(object_ids=object_ids, edoc_format=edoc_format)
+
+
+async def test_failed_answer_exports_surface_as_a_job_warning(
+    monkeypatch,
+    in_memory_db,  # noqa: F811
+    patched_config,  # noqa: F811
+):
+    """S60: answers the server refused to export are a COMPLETE-with-warnings job, not a silent one;
+    a clean run carries no `warnings` key; the failed answer keeps its prior usage rows."""
+    from ts_admin.services import lineage_service
+
+    _seed(in_memory_db)
+    _seed_answers(in_memory_db)
+    _fake_client(monkeypatch)
+
+    clean_id = _make_job()
+    await lineage_service.build_answer_index(cluster_id=CLUSTER_ID, org_id=0, job_id=clean_id)
+    assert "warnings" not in _job_result(in_memory_db, clean_id)
+    before = {r.consumer_guid for r in _usage_rows(in_memory_db)}
+    assert "answer-2" in before
+
+    _set_answer_modified(in_memory_db, "answer-2", datetime.now(tz=timezone.utc) + timedelta(hours=1))
+    monkeypatch.setattr("ts_admin.ts_client.ThoughtSpotClient", lambda *a, **k: _PoisonAnswerClient("answer-2"))
+    job_id = _make_job()
+    await lineage_service.build_answer_index(cluster_id=CLUSTER_ID, org_id=0, job_id=job_id)
+
+    result = _job_result(in_memory_db, job_id)
+    assert result["failed_exports"] == 1
+    assert result["warnings"] == ["1 answer(s) failed TML export and were skipped"]
+    assert {r.consumer_guid for r in _usage_rows(in_memory_db)} == before

@@ -1741,6 +1741,7 @@ async def build_answer_index(*, cluster_id: str, org_id: int, job_id: str, incre
     }
     if failed_exports:
         result["failed_exports"] = len(failed_exports)
+        result["warnings"] = [f"{len(failed_exports)} answer(s) failed TML export and were skipped"]
         logger.warning(
             "Deep answer index: %d answer(s) failed TML export and were skipped for cluster=%s org=%s",
             len(failed_exports),

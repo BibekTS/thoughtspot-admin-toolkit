@@ -55,6 +55,7 @@
   /* Status (solid + soft + border triple each) */
   --success:        #2d8b65;  --success-soft: #e6f4ed;  --success-border: #c0dccf;
   --warn:           #c08930;  --warn-soft:    #faf3e0;  --warn-border:    #ead9a8;
+  --warn-text:      #855500;  /* AA text on warn-soft + surface; --warn stays for fills/borders */
   --danger:         #b85450;  --danger-soft:  #fae9e8;  --danger-border:  #ebcccc;
 
   /* Code surface */
@@ -114,6 +115,7 @@
   --text-muted:    #8792b8;
   --success:        #4fbf8f;  --success-soft: #102a20;  --success-border: #1c4a3a;
   --warn:           #e0b25a;  --warn-soft:    #2c2410;  --warn-border:    #4a3d1c;
+  --warn-text:      #e0b25a;
   --danger:         #e07b76;  --danger-soft:  #2e1615;  --danger-border:  #4a2321;
   --code-bg:       #05081a;
   --code-fg:       #e6edf3;
@@ -256,7 +258,7 @@ button { font-family: inherit; }
 }
 .status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .status[data-state="idle"]       { color: var(--text-muted); background: var(--surface-3); }
-.status[data-state="connecting"] { color: var(--warn);    background: var(--warn-soft);    border: 1px solid var(--warn-border); }
+.status[data-state="connecting"] { color: var(--warn-text);    background: var(--warn-soft);    border: 1px solid var(--warn-border); }
 .status[data-state="ok"]         { color: var(--success); background: var(--success-soft); border: 1px solid var(--success-border); }
 .status[data-state="error"]      { color: var(--danger);  background: var(--danger-soft);  border: 1px solid var(--danger-border); }
 .status[data-state="connecting"]::before { animation: status-pulse 1s ease-in-out infinite; }

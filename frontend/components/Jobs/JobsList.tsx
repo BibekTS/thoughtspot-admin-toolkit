@@ -33,7 +33,7 @@ const STATUS_COLORS: Record<JobStatus, { bg: string; fg: string }> = {
   PENDING:  { bg: theme.color.surface3, fg: theme.color.textSecondary },
   RUNNING:  { bg: theme.color.accentSoft, fg: theme.color.accent2 },
   COMPLETE: { bg: theme.color.successSoft, fg: theme.color.success },
-  PARTIAL:  { bg: theme.color.warnSoft, fg: theme.color.warn },
+  PARTIAL:  { bg: theme.color.warnSoft, fg: theme.color.warnText },
   FAILED:   { bg: theme.color.dangerSoft, fg: theme.color.danger },
 };
 
@@ -70,7 +70,7 @@ function buildJobColumns(onShowDetails: (job: Job) => void): ColDef<Job>[] {
       const c = cancelled
         ? { bg: theme.color.surface3, fg: theme.color.textSecondary }
         : warnings.length
-        ? { bg: theme.color.warnSoft, fg: theme.color.warn }
+        ? { bg: theme.color.warnSoft, fg: theme.color.warnText }
         : STATUS_COLORS[p.value] ?? { bg: theme.color.surface3, fg: theme.color.textSecondary };
       return (
         <span

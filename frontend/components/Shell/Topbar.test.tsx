@@ -193,8 +193,8 @@ describe("buildSyncColor", () => {
     [59 * MINUTE, theme.color.success],
     [HOUR, theme.color.textMuted],
     [5 * HOUR, theme.color.textMuted],
-    [6 * HOUR, theme.color.warn],
-    [3 * DAY, theme.color.warn],
+    [6 * HOUR, theme.color.warnText],
+    [3 * DAY, theme.color.warnText],
   ])("colours a SUCCESS row %ims old as %s", (ago, expected) => {
     expect(buildSyncColor(log("SUCCESS", stampAgo(ago)), false, NOW)).toBe(expected);
   });

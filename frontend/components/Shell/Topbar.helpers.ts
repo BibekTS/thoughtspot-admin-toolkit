@@ -93,5 +93,5 @@ export function buildSyncColor(log: SyncLogOrUnknown, isSyncing: boolean, now: n
   const hours = (now - parseUtc(log.synced_at).getTime()) / 3_600_000;
   if (hours < 1) return theme.color.success;
   if (hours < 6) return theme.color.textMuted;
-  return theme.color.warn;
+  return theme.color.warnText;
 }
