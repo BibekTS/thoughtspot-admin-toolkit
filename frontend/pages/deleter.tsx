@@ -33,7 +33,7 @@ import { theme } from "@/lib/theme";
 import type { DeleterItem, DeleterMode, DeleterResolveResponse, RootSearchItem } from "@/lib/types";
 
 const MODES: { id: DeleterMode; label: string; icon: typeof GitBranch; tagline: string }[] = [
-  { id: "downstream", label: "Downstream", icon: GitBranch,    tagline: "Delete everything that depends on a root object." },
+  { id: "downstream", label: "Downstream", icon: GitBranch,    tagline: "Delete a root object and everything that depends on it." },
   { id: "tag",        label: "From Tag",   icon: Tag,           tagline: "Delete everything tagged with a label." },
   { id: "list",       label: "From List",  icon: ClipboardList, tagline: "Delete a specific list of GUIDs." },
 ];

@@ -7,7 +7,7 @@ the *intake*: turning one of three user-supplied selections into a list of
 CachedMetadata rows.
 
 Modes:
-  - resolve_downstream — given a root GUID, return its dependents (root excluded)
+  - resolve_downstream — given a root GUID, return the root plus its dependents
   - resolve_tag        — given a tag name, return all CachedMetadata with that tag
   - resolve_list       — given a list of GUIDs, return resolved rows + unrecognized
 """
@@ -66,10 +66,12 @@ async def resolve_downstream(
     org_id: int,
 ) -> dict:
     """
-    Return all objects that depend on `root_guid`.
+    Return `root_guid` itself (first) plus all objects that depend on it.
 
-    The root itself is *excluded* from the result (matching the CLI's
-    `bulk-deleter downstream` semantics — the root data source is preserved).
+    The root is included so a leaf root (a liveboard or answer, which has no
+    dependents) is still deletable — the picker promised "only the root would
+    be deleted" and then offered nothing. The UI pre-selects every row, so an
+    admin who wants the CLI's keep-the-root behaviour unticks the first row.
 
     Calls TS REST `/dependency/listdependents`, then enriches each dependent
     GUID against CachedMetadata. Dependents not in the local cache are
@@ -104,12 +106,11 @@ async def resolve_downstream(
         if gid and gid != root_guid:
             dep_guids.append(gid)
 
-    if not dep_guids:
-        return {"items": [], "total": 0, "by_type": {}, "root_guid": root_guid}
-
     with Session(_db.get_engine()) as session:
-        rows = _fetch_objects_by_guids(session, dep_guids, cluster_id, org_id)
+        rows = _fetch_objects_by_guids(session, [root_guid, *dep_guids], cluster_id, org_id)
 
+    # Root first, so it heads the grid and is easy to untick.
+    rows.sort(key=lambda r: r.ts_guid != root_guid)
     items = [_row_to_dict(r) for r in rows if r.owner_name != SYSTEM_OWNER_NAME]
     return {
         "items": items,
