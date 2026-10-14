@@ -124,6 +124,14 @@ class AnswerIndexResponse(BaseModel):
     rows_written: int  # 0 = already indexed / not an answer / inaccessible
 
 
+class ResyncResponse(BaseModel):
+    guid: str
+    node_type: str
+    status: str  # "ok" | "export_failed" (old rows kept)
+    rows: dict[str, int]
+    duration_ms: int
+
+
 class DeepIndexResponse(BaseModel):
     job_id: str
 
@@ -171,6 +179,34 @@ async def index_answer(
     except (TSConnectionError, TSServerError, TSResponseParseError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return AnswerIndexResponse(guid=guid, rows_written=rows)
+
+
+@router.post("/objects/{guid}/resync", response_model=ResyncResponse)
+async def resync_object(
+    guid: str,
+    cluster_id: str | None = Query(default=None),
+    org_id: int = Query(default=0),
+) -> ResyncResponse:
+    """Re-export ONE liveboard/answer/model and replace just its lineage rows (cache-only)."""
+    try:
+        result = await lineage_service.resync_object(
+            cluster_id=_resolve_cluster_id(cluster_id), org_id=org_id, guid=guid
+        )
+    except lineage_service.ObjectNotCachedError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except lineage_service.ResyncUnsupportedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except lineage_service.ResyncInFlightError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TSAuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except TSInsufficientPrivilegesError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TSObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TSConnectionError, TSServerError, TSResponseParseError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ResyncResponse(**result)
 
 
 @router.post("/deep-index", response_model=DeepIndexResponse, status_code=202)

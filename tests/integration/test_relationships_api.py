@@ -167,3 +167,63 @@ def test_deep_index_409_when_one_in_flight(client, seeded, monkeypatch):
     assert client.post(url + "c1").status_code == 409
     # a different cluster is independent
     assert client.post(url + "c2").status_code == 202
+
+
+# ── POST /relationships/objects/{guid}/resync (S54) ────────────────────────────
+
+
+def test_resync_unknown_guid_is_404(client, seeded):
+    r = client.post("/api/v1/relationships/objects/nope/resync?cluster_id=c1&org_id=0")
+    assert r.status_code == 404
+
+
+def test_resync_table_is_422(client, seeded):
+    r = client.post("/api/v1/relationships/objects/table-1/resync?cluster_id=c1&org_id=0")
+    assert r.status_code == 422
+    assert "full dependencies sync" in r.json()["detail"]
+
+
+def test_resync_is_409_while_dependencies_sync_in_flight(client, seeded):
+    from ts_admin.services.job_service import create_job
+
+    create_job(job_type="sync:dependencies", parameters={"org_id": 0}, cluster_id="c1")
+    r = client.post("/api/v1/relationships/objects/lb-1/resync?cluster_id=c1&org_id=0")
+    assert r.status_code == 409
+    # The guard is per (cluster, org): org 1 is not blocked by org 0's job.
+    r = client.post("/api/v1/relationships/objects/lb-1/resync?cluster_id=c1&org_id=1")
+    assert r.status_code == 404
+
+
+def test_resync_returns_service_result(client, seeded, monkeypatch):
+    async def fake(*, cluster_id, org_id, guid):
+        return {"guid": guid, "node_type": "LIVEBOARD", "status": "ok", "rows": {"usage": 3}, "duration_ms": 7}
+
+    monkeypatch.setattr("ts_admin.services.lineage_service.resync_object", fake)
+    r = client.post("/api/v1/relationships/objects/lb-1/resync?cluster_id=c1&org_id=0")
+    assert r.status_code == 200
+    assert r.json() == {
+        "guid": "lb-1",
+        "node_type": "LIVEBOARD",
+        "status": "ok",
+        "rows": {"usage": 3},
+        "duration_ms": 7,
+    }
+
+
+@pytest.mark.parametrize(
+    ("make_exc", "status"),
+    [
+        (lambda e: e.TSAuthenticationError("x"), 401),
+        (lambda e: e.TSInsufficientPrivilegesError("x"), 403),
+        (lambda e: e.TSServerError(500, "x"), 502),
+    ],
+)
+def test_resync_maps_thoughtspot_errors(client, seeded, monkeypatch, make_exc, status):
+    from ts_admin.ts_client import exceptions
+
+    async def boom(*, cluster_id, org_id, guid):
+        raise make_exc(exceptions)
+
+    monkeypatch.setattr("ts_admin.services.lineage_service.resync_object", boom)
+    r = client.post("/api/v1/relationships/objects/lb-1/resync?cluster_id=c1&org_id=0")
+    assert r.status_code == status
