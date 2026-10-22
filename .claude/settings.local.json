@@ -22,7 +22,16 @@
       "Bash(gh release *)",
       "Bash(/private/tmp/claude-501/-Users-bibekshrestha-TS-Projects-Admin-tookit/bd21f438-8f59-4014-b254-aecb9e5540b6/scratchpad/wheelcheck/bin/ts-admin-toolkit serve *)",
       "Bash(lsof -nP -iTCP -sTCP:LISTEN)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8080/health)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8080/health)",
+      "Bash(grep -E '^\\(ruff|pytest\\)$')",
+      "Bash(mv release *)",
+      "Bash(sed -i '' -e 's/^name: release$/name: admin-toolkit-release/' -e 's/or invokes \\\\/release\\\\./or invokes \\\\/admin-toolkit-release./' -e 's/^# \\\\/release — /# \\\\/admin-toolkit-release — /' admin-toolkit-release/SKILL.md)",
+      "Bash(git checkout *)",
+      "Bash(git pull *)",
+      "Bash(gh run *)",
+      "Bash(echo \"help=$?\")",
+      "Bash(lsof -nP -iTCP:8080 -sTCP:LISTEN)",
+      "Bash(/private/tmp/claude-501/-Users-bibekshrestha-TS-Projects-Admin-tookit/2ddb810a-0642-42ea-b39d-4a2de9491a4b/scratchpad/wheel-0.5.0/bin/ts-admin-toolkit serve *)"
     ]
   }
 }
