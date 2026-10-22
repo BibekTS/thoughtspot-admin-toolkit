@@ -12,14 +12,22 @@ A local web app for ThoughtSpot admins. It caches your instance's users, groups 
 
 ## Quick start
 
+**macOS / Linux**
+
 ```bash
-# macOS / Linux
 curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | sh
+```
 
-# Windows (PowerShell)
+**Windows (PowerShell)**
+
+```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.ps1 | iex"
+```
 
-ts-admin-toolkit serve    # opens http://localhost:8080
+Then start it (opens http://localhost:8080):
+
+```bash
+ts-admin-toolkit serve
 ```
 
 No Python or Node.js needed; the installer brings its own. You need a ThoughtSpot instance (Cloud or Software) and a login with the `ADMINISTRATION` privilege.
@@ -34,6 +42,27 @@ Releases are wheels on [GitHub Releases](https://github.com/kunalghate/thoughtsp
 ```bash
 uv tool install https://github.com/kunalghate/thoughtspot-admin-toolkit/releases/latest/download/<wheel>
 ```
+
+</details>
+
+<details>
+<summary>Install fails with <code>invalid peer certificate: UnknownIssuer</code></summary>
+
+Your network inspects HTTPS traffic (a corporate proxy such as Zscaler or Netskope), and the installer doesn't trust the proxy's certificate by default. Re-run it so it uses your system's certificates:
+
+**macOS / Linux**
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | UV_NATIVE_TLS=1 sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+$env:UV_NATIVE_TLS=1; irm https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.ps1 | iex
+```
+
+If it still fails, ask IT for your company's root CA certificate (`.pem`), run `export SSL_CERT_FILE=/path/to/ca.pem` (PowerShell: `$env:SSL_CERT_FILE="C:\path\to\ca.pem"`), then run the installer again.
 
 </details>
 
