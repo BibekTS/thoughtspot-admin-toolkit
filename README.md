@@ -15,13 +15,13 @@ A local web app for ThoughtSpot admins. It caches your instance's users, groups 
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.sh | sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.ps1 | iex"
 ```
 
 Then start it (opens http://localhost:8080):
@@ -37,10 +37,10 @@ On first launch, enter your instance URL and credentials (Basic, Trusted Auth or
 <details>
 <summary>Install with uv or pip instead</summary>
 
-Releases are wheels on [GitHub Releases](https://github.com/kunalghate/thoughtspot-admin-toolkit/releases), not PyPI:
+Releases are wheels on [GitHub Releases](https://github.com/BibekTS/thoughtspot-admin-toolkit/releases), not PyPI:
 
 ```bash
-uv tool install https://github.com/kunalghate/thoughtspot-admin-toolkit/releases/latest/download/<wheel>
+uv tool install https://github.com/BibekTS/thoughtspot-admin-toolkit/releases/latest/download/<wheel>
 ```
 
 </details>
@@ -53,13 +53,13 @@ Your network inspects HTTPS traffic (a corporate proxy such as Zscaler or Netsko
 **macOS / Linux**
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | UV_NATIVE_TLS=1 sh
+curl -LsSf https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.sh | UV_NATIVE_TLS=1 sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-$env:UV_NATIVE_TLS=1; irm https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.ps1 | iex
+$env:UV_NATIVE_TLS=1; irm https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.ps1 | iex
 ```
 
 If it still fails, ask IT for your company's root CA certificate (`.pem`), run `export SSL_CERT_FILE=/path/to/ca.pem` (PowerShell: `$env:SSL_CERT_FILE="C:\path\to\ca.pem"`), then run the installer again.

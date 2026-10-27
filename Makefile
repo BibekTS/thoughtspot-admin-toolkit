@@ -83,7 +83,7 @@ release-github:
 	gh release create v$(v) dist/*.whl --title "v$(v)" --generate-notes
 	@echo ""
 	@echo "Released. Users can now install with:"
-	@echo "  curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | sh"
+	@echo "  curl -LsSf https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.sh | sh"
 
 # Usage: make release v=1.0.0
 release:

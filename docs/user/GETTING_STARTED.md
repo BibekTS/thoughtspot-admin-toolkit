@@ -24,7 +24,7 @@ Open **Terminal** (on a Mac: press `Cmd + Space`, type `Terminal`, press Enter).
 Copy the line below, paste it in, and press Enter:
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.sh | sh
 ```
 
 **On Windows**
@@ -33,7 +33,7 @@ Open **PowerShell** (press the Windows key, type `PowerShell`, press Enter).
 Copy the line below, paste it in, and press Enter:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.ps1 | iex"
 ```
 
 It takes a minute or two. When it finishes it prints `Done. The toolkit is

@@ -1,7 +1,7 @@
 #!/bin/sh
 # ThoughtSpot Admin Toolkit — one-line installer for macOS and Linux.
 #
-#   curl -LsSf https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.sh | sh
+#   curl -LsSf https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.sh | sh
 #
 # Installs uv (a self-contained package manager) if it is not already present,
 # then installs the toolkit into its own isolated environment. uv downloads a
@@ -15,7 +15,7 @@
 
 set -eu
 
-REPO="kunalghate/thoughtspot-admin-toolkit"
+REPO="BibekTS/thoughtspot-admin-toolkit"
 PYTHON_VERSION="3.12"
 UV_INSTALLER="https://astral.sh/uv/install.sh"
 

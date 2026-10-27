@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-GITHUB_REPO = "kunalghate/thoughtspot-admin-toolkit"
+GITHUB_REPO = "BibekTS/thoughtspot-admin-toolkit"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 
