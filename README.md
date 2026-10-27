@@ -1,5 +1,7 @@
 # ThoughtSpot Admin Toolkit
 
+**[Website](https://bibekts.github.io/thoughtspot-admin-toolkit/)** · [Releases](https://github.com/BibekTS/thoughtspot-admin-toolkit/releases) · [Getting started](docs/user/GETTING_STARTED.md)
+
 **Find stale content, clean up leavers, and see what depends on what, without writing a script.**
 
 A local web app for ThoughtSpot admins. It caches your instance's users, groups and content, so you can browse instantly, then run bulk changes (archive, delete, share, transfer ownership) with a dry-run preview and a TML backup first.
