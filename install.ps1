@@ -1,6 +1,6 @@
 # ThoughtSpot Admin Toolkit — one-line installer for Windows.
 #
-#   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/kunalghate/thoughtspot-admin-toolkit/main/install.ps1 | iex"
+#   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/BibekTS/thoughtspot-admin-toolkit/main/install.ps1 | iex"
 #
 # Installs uv (a self-contained package manager) if it is not already present,
 # then installs the toolkit into its own isolated environment. uv downloads a
@@ -14,7 +14,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$Repo          = "kunalghate/thoughtspot-admin-toolkit"
+$Repo          = "BibekTS/thoughtspot-admin-toolkit"
 $PythonVersion = "3.12"
 $UvInstaller   = "https://astral.sh/uv/install.ps1"
 
