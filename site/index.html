@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ThoughtSpot Admin Toolkit</title>
+  <meta name="description" content="A local web app for ThoughtSpot admins: find stale content, clean up leavers, and see what depends on what, without writing a script.">
+  <meta property="og:title" content="ThoughtSpot Admin Toolkit">
+  <meta property="og:description" content="Find stale content, clean up leavers, and see what depends on what, without writing a script.">
+  <meta property="og:image" content="assets/dashboard.jpg">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 22'%3E%3Crect x='1' y='1' width='20' height='20' rx='5' fill='%23818cf8'/%3E%3Cpath d='M6 8h10M6 11h6M6 14h8' stroke='%230b0c24' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5.3.0/index.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@5.3.0/index.css">
+  <script>try{if(localStorage.getItem("ts-admin-toolkit-theme")==="light")document.documentElement.setAttribute("data-theme","light")}catch(e){}</script>
+  <style>
+    /* Dark by default, one accent, one radius. Light theme is a user choice (data-theme="light"). */
+    :root {
+      --bg: #0b0c14;
+      --surface: #11131e;
+      --raised: #181b29;
+      --text: #e8ecff;
+      --muted: #8d93ad;
+      --line: #242840;
+      --accent: #818cf8;
+      --accent-ink: #0b0c24;
+      --accent-soft: #181a3a;
+      --glow: rgba(129, 140, 248, 0.16);
+      --grid: rgba(232, 236, 255, 0.05);
+      --warn: #e8a33a;
+      --radius: 8px;
+      --sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] {
+      --bg: #f5f6fb; --surface: #ffffff; --raised: #eceef7; --text: #1a1f4a; --muted: #5a6080;
+      --line: #dcdfee; --accent: #4f46e5; --accent-ink: #ffffff; --accent-soft: #e9e8fc;
+      --glow: rgba(79, 70, 229, 0.10); --grid: rgba(26, 31, 74, 0.06); --warn: #a8670a;
+      color-scheme: light;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; scroll-padding-top: 76px; scroll-behavior: smooth; }
+    body {
+      margin: 0; overflow-x: clip; background: var(--bg); color: var(--text); font-family: var(--sans);
+      font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background-image: radial-gradient(var(--grid) 1px, transparent 1px); background-size: 28px 28px;
+      -webkit-mask-image: linear-gradient(to bottom, #000, rgba(0,0,0,.3) 60%, transparent);
+      mask-image: linear-gradient(to bottom, #000, rgba(0,0,0,.3) 60%, transparent);
+    }
+    body::after {
+      content: ""; position: fixed; z-index: -1; pointer-events: none; top: -260px; right: -180px;
+      width: 760px; height: 760px; border-radius: 50%; background: radial-gradient(closest-side, var(--glow), transparent);
+    }
+    a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+    a:hover { color: var(--accent); }
+    code, pre { font-family: var(--mono); font-size: 0.875em; }
+    :not(pre) > code { background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 0.1em 0.35em; }
+    pre {
+      margin: 0; overflow-x: auto; background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 14px 16px; line-height: 1.6;
+    }
+    img { display: block; max-width: 100%; height: auto; }
+    h1, h2, h3 { line-height: 1.15; letter-spacing: -0.02em; margin: 0; }
+    .wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+    .dim { color: var(--muted); }
+    .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin: 0 0 12px; }
+
+    /* Header */
+    .top { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+    .top .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; gap: 16px; }
+    .brand { font-weight: 650; text-decoration: none; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+    .brand svg { flex: none; }
+    .nav { display: flex; align-items: center; gap: 22px; font-size: 14px; }
+    .nav a { text-decoration: none; color: var(--muted); }
+    .nav a:hover { color: var(--text); }
+    .theme-toggle { font: 12px var(--mono); color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+    .theme-toggle:hover { color: var(--text); border-color: var(--muted); }
+
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); text-decoration: none; font-weight: 550; font-size: 15px; }
+    .btn:hover { border-color: var(--muted); color: var(--text); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    .btn-primary:hover { color: var(--accent-ink); filter: brightness(1.08); }
+
+    /* Hero */
+    .hero { padding: 72px 0 56px; }
+    .hero .wrap { display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center; }
+    .hero h1 { font-size: clamp(34px, 4.2vw, 48px); font-weight: 650; }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .lead { font-size: 19px; color: var(--muted); margin: 22px 0 30px; max-width: 34em; }
+    .lead b { color: var(--text); font-weight: 550; }
+    .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+    .note { font-size: 13.5px; color: var(--muted); margin: 18px 0 0; }
+
+    .shot { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: 0 30px 80px -40px rgba(0,0,0,.6); }
+    .shot-bar { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid var(--line); font: 11.5px var(--mono); color: var(--muted); }
+    .shot-bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+    .shot-bar span { margin-left: 8px; }
+    .shot img { background: #fff; }
+
+    /* Stats */
+    .stats { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 60%, transparent); }
+    .stats .wrap { display: grid; grid-template-columns: repeat(4, 1fr); }
+    .stat { padding: 22px 20px; border-left: 1px solid var(--line); }
+    .stat:first-child { border-left: 0; padding-left: 0; }
+    .stat b { display: block; font-size: 30px; font-weight: 650; letter-spacing: -0.02em; }
+    .stat span { font-size: 14px; color: var(--muted); }
+
+    /* Blocks */
+    .block { padding: 88px 0 0; }
+    .block h2 { font-size: clamp(28px, 3.4vw, 40px); font-weight: 650; }
+    .intro { color: var(--muted); font-size: 17px; max-width: 46em; margin: 14px 0 36px; }
+
+    /* Three steps */
+    .steps { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; counter-reset: step; }
+    .step { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .step h3 { font-size: 19px; display: flex; align-items: center; gap: 10px; }
+    .step h3::before { counter-increment: step; content: counter(step); font: 600 13px var(--mono); width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
+    .step p { margin: 0; color: var(--muted); font-size: 15px; }
+    .step ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 15px; }
+    .step li { margin: 3px 0; }
+    .codeblock { position: relative; }
+    .codeblock pre { padding-right: 64px; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .copy { position: absolute; top: 8px; right: 8px; font: 11px var(--mono); color: var(--muted); background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+    .copy:hover { color: var(--text); }
+    .small { font-size: 13.5px !important; }
+    .tabs { display: flex; gap: 6px; margin: 2px 0 0; flex-wrap: wrap; }
+    .tabs button { font: 12px var(--mono); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; }
+    .tabs button[aria-selected="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+    [data-panel] { display: flex; flex-direction: column; gap: 10px; }
+    [hidden] { display: none !important; }
+    .auths { display: flex; gap: 6px; flex-wrap: wrap; }
+    .auths span { font: 12px var(--mono); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--text); }
+
+    /* Capabilities */
+    .features { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .feature { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
+    .feature .pic { aspect-ratio: 16 / 9; overflow: hidden; border-bottom: 1px solid var(--line); background: #fff; }
+    .feature .pic img { width: 100%; height: 100%; object-fit: cover; object-position: left top; }
+    .feature figcaption { padding: 16px 18px 18px; }
+    .feature b, .mini b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+    .feature span, .mini span { font-size: 14.5px; color: var(--muted); }
+    .minis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px; }
+    .mini { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+    .mini svg { color: var(--accent); margin-bottom: 10px; display: block; }
+    .shots-note { color: var(--muted); font-size: 13.5px; margin-top: 14px; }
+
+    /* How it works */
+    .arch-figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+    .arch { width: 100%; height: auto; display: block; font-family: var(--sans); }
+    .arch .mono { font-family: var(--mono); }
+    .checks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+    .check { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; background: var(--surface); }
+    .check b { display: block; font-size: 15px; margin-bottom: 2px; }
+    .check span { font-size: 14px; color: var(--muted); }
+
+    /* Closing */
+    .closing { padding: 88px 0 96px; }
+    .closing .row { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 12px; padding: 32px; background: var(--accent-soft); }
+    .closing h2 { font-size: clamp(24px, 3vw, 32px); font-weight: 650; }
+    .closing p { margin: 8px 0 0; color: var(--muted); max-width: 40em; }
+    .foot { border-top: 1px solid var(--line); padding: 22px 0; font-size: 13.5px; color: var(--muted); }
+    .foot .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .foot p { margin: 0; max-width: 46em; }
+
+    .reveal { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+    }
+
+    @media (max-width: 960px) {
+      .hero .wrap { grid-template-columns: 1fr; gap: 40px; }
+      .steps { grid-template-columns: 1fr; }
+      .minis { grid-template-columns: 1fr 1fr; }
+      .checks { grid-template-columns: 1fr 1fr; }
+      .stats .wrap { grid-template-columns: 1fr 1fr; }
+      .stat:nth-child(3) { border-left: 0; padding-left: 0; }
+      .stat:nth-child(n+3) { border-top: 1px solid var(--line); }
+    }
+    @media (max-width: 640px) {
+      .wrap { padding: 0 16px; }
+      .hide-sm { display: none; }
+      .nav { gap: 14px; }
+      .brand .long { display: none; }
+      .hero { padding-top: 44px; }
+      .features, .minis, .checks { grid-template-columns: 1fr; }
+      .stat { padding: 16px 12px; }
+      .stat b { font-size: 24px; }
+      .block { padding-top: 64px; }
+      .closing { padding: 64px 0 72px; }
+      .closing .row { padding: 22px; }
+      .arch-figure { overflow-x: auto; }
+      .arch { min-width: 720px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="./">
+        <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="1" width="20" height="20" rx="5" fill="var(--accent)"/><path d="M6 8h10M6 11h6M6 14h8" stroke="var(--accent-ink)" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <span><span class="long">ThoughtSpot </span>Admin Toolkit</span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a class="hide-sm" href="#start">Get started</a>
+        <a class="hide-sm" href="#features">Features</a>
+        <a class="hide-sm" href="#how">How it works</a>
+        <a href="https://github.com/BibekTS/thoughtspot-admin-toolkit">GitHub</a>
+        <button class="theme-toggle" type="button">theme: dark</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <div>
+          <p class="eyebrow">A local web app for ThoughtSpot admins</p>
+          <h1>Clean up ThoughtSpot<br><em>without writing a&nbsp;script.</em></h1>
+          <p class="lead">Find stale content, clean up leavers, and see what depends on what. The toolkit caches your instance's users, groups and content so you can browse instantly, then runs bulk changes with <b>a dry-run preview and a TML backup first.</b></p>
+          <div class="ctas">
+            <a class="btn btn-primary" href="#start">Install in one command</a>
+            <a class="btn" href="https://github.com/BibekTS/thoughtspot-admin-toolkit">View on GitHub</a>
+          </div>
+          <p class="note">For ThoughtSpot Cloud or Software. No Python or Node.js needed.</p>
+        </div>
+        <figure class="shot">
+          <div class="shot-bar" aria-hidden="true"><i></i><i></i><i></i><span>localhost:8080 · Dashboard</span></div>
+          <img src="assets/dashboard.jpg" width="1400" height="875" alt="The Dashboard: what needs attention, user, group and content totals, cache freshness per entity, content by type and recent jobs">
+        </figure>
+      </div>
+    </section>
+
+    <div class="stats" role="list">
+      <div class="wrap">
+        <div class="stat" role="listitem"><b>1 command</b><span>to install; it brings its own Python</span></div>
+        <div class="stat" role="listitem"><b>3 platforms</b><span>macOS, Linux and Windows</span></div>
+        <div class="stat" role="listitem"><b>3 sign-ins</b><span>Basic, Trusted Auth or Bearer token</span></div>
+        <div class="stat" role="listitem"><b>127.0.0.1</b><span>runs on your machine only, never exposed</span></div>
+      </div>
+    </div>
+
+    <section class="block reveal" id="start">
+      <div class="wrap">
+        <h2>Get started in three steps.</h2>
+        <p class="intro">You need a ThoughtSpot login with the <code>ADMINISTRATION</code> privilege. Everything after the install happens in the browser.</p>
+        <div class="steps">
+          <div class="step">
+            <h3>Install</h3>
+            <div class="tabs" role="tablist" aria-label="Operating system">
+              <button type="button" role="tab" aria-selected="true" data-tab="unix">macOS / Linux</button>
+              <button type="button" role="tab" aria-selected="false" data-tab="win">Windows</button>
+            </div>
+            <div data-panel="unix">
+              <div class="codeblock">
+                <pre><code>curl -LsSf https://raw.githubusercontent.com/<wbr>BibekTS/<wbr>thoughtspot-admin-toolkit/<wbr>main/<wbr>install.sh | sh</code></pre>
+                <button class="copy" type="button">Copy</button>
+              </div>
+            </div>
+            <div data-panel="win" hidden>
+              <div class="codeblock">
+                <pre><code>powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/<wbr>BibekTS/<wbr>thoughtspot-admin-toolkit/<wbr>main/<wbr>install.ps1 | iex"</code></pre>
+                <button class="copy" type="button">Copy</button>
+              </div>
+            </div>
+            <p class="small">Installs into its own isolated environment. Re-run it to upgrade. Behind a corporate proxy? See <a href="https://github.com/BibekTS/thoughtspot-admin-toolkit#quick-start">the certificate fix</a>.</p>
+          </div>
+          <div class="step">
+            <h3>Open the app</h3>
+            <div class="codeblock">
+              <pre><code>ts-admin-toolkit serve</code></pre>
+              <button class="copy" type="button">Copy</button>
+            </div>
+            <p>Opens <code>http://localhost:8080</code> in your browser. Keep the terminal open while you use it.</p>
+          </div>
+          <div class="step">
+            <h3>Connect your instance</h3>
+            <p>Enter your ThoughtSpot URL, pick a sign-in method and click <b>Test connection</b>.</p>
+            <div class="auths"><span>Basic</span><span>Trusted Auth</span><span>Bearer token</span></div>
+            <p>Credentials go to your OS keychain. Then sync each section on its own; nothing forces a full sync.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="block reveal" id="features">
+      <div class="wrap">
+        <h2>What you can do.</h2>
+        <p class="intro">Browse from a local cache, then act in bulk. Every sync and bulk operation runs as a tracked background job with live progress.</p>
+        <div class="features">
+          <figure class="feature">
+            <div class="pic"><img src="assets/archiver.jpg" loading="lazy" width="1400" height="875" alt="Archiver: liveboards and answers unused for 90 days, with owner, tags, days unused and views"></div>
+            <figcaption><b>Archiver</b><span>Find stale liveboards and answers, tag them, delete with a TML backup, and restore from History.</span></figcaption>
+          </figure>
+          <figure class="feature">
+            <div class="pic"><img src="assets/users.jpg" loading="lazy" width="1400" height="875" alt="Users: a searchable grid of users with status, creator and created date"></div>
+            <figcaption><b>Users</b><span>Transfer ownership, transfer sharing and bulk delete leavers. A drawer shows each user's groups and effective privileges.</span></figcaption>
+          </figure>
+          <figure class="feature">
+            <div class="pic"><img src="assets/metadata.jpg" loading="lazy" width="1400" height="875" alt="Metadata: all content with type, connection, owner, tags, last accessed and views"></div>
+            <figcaption><b>Metadata</b><span>Search and filter all content by owner, tag, last accessed and views, and export it to CSV.</span></figcaption>
+          </figure>
+          <figure class="feature">
+            <div class="pic"><img src="assets/lineage.jpg" loading="lazy" width="1400" height="875" alt="Lineage: a connection feeding logical tables, a model, and the liveboards and answers built on it"></div>
+            <figcaption><b>Lineage</b><span>A dependency graph, plus column-level lineage from a model column back to its physical table and forward to every consumer.</span></figcaption>
+          </figure>
+        </div>
+        <div class="minis">
+          <div class="mini">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            <b>Bulk Delete</b><span>Delete by GUID or search, with dependency resolution.</span>
+          </div>
+          <div class="mini">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+            <b>Bulk Sharing</b><span>Share content to users and groups in bulk, with an impact preview.</span>
+          </div>
+          <div class="mini">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.2 3.2 0 010 7M21 20c0-2.6-1.6-4.8-4-5.6"/></svg>
+            <b>Groups</b><span>Browse groups, privileges, members, and who created each group. Read-only.</span>
+          </div>
+          <div class="mini">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6M7 17h8"/></svg>
+            <b>Jobs</b><span>Every sync and bulk operation is a tracked background job with live progress.</span>
+          </div>
+          <div class="mini">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg>
+            <b>Multi-instance</b><span>Several ThoughtSpot instances, each with its own cache, one picker in the sidebar.</span>
+          </div>
+          <div class="mini">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19h16M4 5h16M7 9l3 3-3 3M12 15h5"/></svg>
+            <b>Diagnostics</b><span>Tail logs and download a support bundle with no credentials in it.</span>
+          </div>
+        </div>
+        <p class="shots-note">Screenshots use sample data.</p>
+      </div>
+    </section>
+
+    <section class="block reveal" id="how">
+      <div class="wrap">
+        <h2>How it works.</h2>
+        <p class="intro">The toolkit talks to the public ThoughtSpot REST API v2 and mirrors users, groups, metadata and lineage into a local SQLite database. Browsing reads the cache. Writes go straight to ThoughtSpot.</p>
+        <figure class="arch-figure">
+          <svg class="arch" viewBox="0 0 1100 360" role="img" aria-labelledby="arch-title arch-desc">
+            <title id="arch-title">Architecture</title>
+            <desc id="arch-desc">Your browser loads the UI from a local server on 127.0.0.1. The server reads from a local SQLite cache, keeps credentials in the OS keychain, and calls the ThoughtSpot REST API v2 over HTTPS to sync data and to make changes.</desc>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker>
+            </defs>
+            <!-- Your machine boundary -->
+            <rect x="12" y="20" width="700" height="324" rx="12" fill="none" stroke="var(--line)" stroke-dasharray="5 5"/>
+            <text x="32" y="48" class="mono" font-size="12" fill="var(--muted)" letter-spacing="1">YOUR MACHINE · 127.0.0.1</text>
+
+            <!-- Browser -->
+            <rect x="36" y="110" width="196" height="96" rx="8" fill="var(--raised)" stroke="var(--line)"/>
+            <text x="56" y="146" font-size="17" font-weight="600" fill="var(--text)">Browser</text>
+            <text x="56" y="170" class="mono" font-size="12" fill="var(--muted)">localhost:8080</text>
+            <text x="56" y="190" font-size="13" fill="var(--muted)">Next.js UI, AG Grid</text>
+
+            <!-- Backend -->
+            <rect x="300" y="96" width="212" height="124" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="320" y="132" font-size="17" font-weight="600" fill="var(--text)">Local server</text>
+            <text x="320" y="156" class="mono" font-size="12" fill="var(--accent)">ts-admin-toolkit serve</text>
+            <text x="320" y="178" font-size="13" fill="var(--muted)">Python, FastAPI</text>
+            <text x="320" y="198" font-size="13" fill="var(--muted)">background jobs, audit log</text>
+
+            <!-- SQLite -->
+            <rect x="300" y="262" width="212" height="64" rx="8" fill="var(--raised)" stroke="var(--line)"/>
+            <text x="320" y="290" font-size="15" font-weight="600" fill="var(--text)">SQLite cache</text>
+            <text x="320" y="311" class="mono" font-size="11.5" fill="var(--muted)">~/.ts-admin/</text>
+
+            <!-- Keychain -->
+            <rect x="540" y="262" width="150" height="64" rx="8" fill="var(--raised)" stroke="var(--line)"/>
+            <text x="558" y="290" font-size="15" font-weight="600" fill="var(--text)">OS keychain</text>
+            <text x="558" y="311" font-size="12.5" fill="var(--muted)">credentials</text>
+
+            <!-- ThoughtSpot -->
+            <rect x="820" y="96" width="250" height="124" rx="8" fill="var(--raised)" stroke="var(--line)"/>
+            <text x="840" y="132" font-size="17" font-weight="600" fill="var(--text)">ThoughtSpot</text>
+            <text x="840" y="156" class="mono" font-size="12" fill="var(--muted)">REST API v2 · HTTPS</text>
+            <text x="840" y="178" font-size="13" fill="var(--muted)">Cloud or Software</text>
+            <text x="840" y="198" font-size="13" fill="var(--muted)">your instance</text>
+
+            <!-- Browser <-> server -->
+            <line x1="236" y1="158" x2="296" y2="158" stroke="var(--muted)" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+
+            <!-- Server <-> SQLite -->
+            <line x1="406" y1="224" x2="406" y2="258" stroke="var(--muted)" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+            <text x="416" y="246" font-size="12" fill="var(--muted)">browse reads the cache</text>
+
+            <!-- Server -> keychain -->
+            <path d="M512 200 C 590 200, 615 220, 615 258" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+            <!-- Server <-> ThoughtSpot: sync -->
+            <path d="M816 130 L516 130" fill="none" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <text x="560" y="120" font-size="13" fill="var(--text)">sync, one entity at a time</text>
+            <!-- Server -> ThoughtSpot: writes -->
+            <path d="M516 186 L816 186" fill="none" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#arrow)"/>
+            <text x="560" y="176" font-size="13" fill="var(--accent)">writes go live, after a dry run</text>
+          </svg>
+        </figure>
+        <div class="checks">
+          <div class="check"><b>Dry run first</b><span>Every destructive action previews its full impact before you confirm.</span></div>
+          <div class="check"><b>TML backup</b><span>Deletions are backed up to <code>~/.ts-admin/tml-exports/</code> and can be restored.</span></div>
+          <div class="check"><b>Live check</b><span>Writes are re-verified against ThoughtSpot at execution time, not against the cache.</span></div>
+          <div class="check"><b>Audit log</b><span>Every write is recorded.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing reveal">
+      <div class="wrap">
+        <div class="row">
+          <div>
+            <h2>Install it in one command.</h2>
+            <p>Then run <code>ts-admin-toolkit serve</code> and connect your instance in the browser. Try it on a non-production instance first.</p>
+          </div>
+          <div class="ctas">
+            <a class="btn btn-primary" href="#start">Get started</a>
+            <a class="btn" href="https://github.com/BibekTS/thoughtspot-admin-toolkit/releases">Releases</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <p>Community tool, not a ThoughtSpot product. Not supported by ThoughtSpot; provided as-is under the MIT license with no warranty. Questions and bugs go to <a href="https://github.com/BibekTS/thoughtspot-admin-toolkit/issues">GitHub issues</a>.</p>
+      <a href="https://github.com/BibekTS/thoughtspot-admin-toolkit">GitHub</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var root = document.documentElement, toggle = document.querySelector(".theme-toggle");
+      function label() { toggle.textContent = "theme: " + (root.getAttribute("data-theme") === "light" ? "light" : "dark"); }
+      label();
+      toggle.addEventListener("click", function () {
+        var light = root.getAttribute("data-theme") !== "light";
+        if (light) root.setAttribute("data-theme", "light"); else root.removeAttribute("data-theme");
+        try { localStorage.setItem("ts-admin-toolkit-theme", light ? "light" : "dark"); } catch (e) {}
+        label();
+      });
+
+      document.querySelectorAll(".copy").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var text = btn.parentNode.querySelector("code").textContent;
+          if (!navigator.clipboard) return;
+          navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1400);
+          });
+        });
+      });
+
+      document.querySelectorAll("[data-tab]").forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          var step = tab.closest(".step");
+          step.querySelectorAll("[data-tab]").forEach(function (t) { t.setAttribute("aria-selected", t === tab); });
+          step.querySelectorAll("[data-panel]").forEach(function (p) { p.hidden = p.getAttribute("data-panel") !== tab.getAttribute("data-tab"); });
+        });
+      });
+      // Default the install tab to Windows for Windows visitors.
+      if (/Win/.test(navigator.platform || "")) { var w = document.querySelector('[data-tab="win"]'); if (w) w.click(); }
+
+      if ("IntersectionObserver" in window) {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+        }, { threshold: 0.08 });
+        document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+      } else {
+        document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
+      }
+    })();
+  </script>
+</body>
+</html>
