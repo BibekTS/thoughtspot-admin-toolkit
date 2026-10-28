@@ -690,7 +690,8 @@ same tool rather than assuming these still hold.
   "certified"-looking modal that will delete a cluster admin with no
   confirmation: "we didn't check" silently became "we checked and it's clean".
   Renamed to `metadata_cache_authoritative` on the S31 surface; the groups half
-  is **S46**. (`metadata_service.stats`'s pre-existing `cache_authoritative` is a
+  is **S46** (resolved 2026-10-27 as `groups_cache_authoritative`, UI-only — see
+  "Admin status certification (S46)" below). (`metadata_service.stats`'s pre-existing `cache_authoritative` is a
   different feature and keeps its name.)
 - **2026-09-08 (S31): `metadata_is_authoritative` being False does NOT mean
   "never synced"** — the write-ahead `IN_PROGRESS` marker means the most common
@@ -1025,3 +1026,36 @@ passing the full five-gate bar. The generalisable lessons:
 - Topbar sync block shrinks (flexShrink 1, minWidth 96) with ellipsis + title; the status dot is `flexShrink: 0` (it is the only colour cue). Rigid-content budget is ~586px at an 800px viewport; label growth beyond ~90px breaks the layout (title collapses, see S64).
 - Playwright browser build mismatch needs an explicit `executablePath` for headless measurement.
 - Mutation hygiene on macOS: `sed -i ''`, backup + python replace, never `git checkout` to restore.
+
+## Admin status certification (S46, 2026-10-27, improve/S46-groups-cache-authoritative)
+
+- **Measured live** (SpotterCode execute, read-only, 2026-10-27, Primary org): every
+  ThoughtSpot org has its OWN org-scoped `Administrator` group (241 orgs checked:
+  Primary, Secondary, Dr TS, Jens each return a distinct `Administrator` id whose
+  `orgs` is only that org), and `groups/search` with `org_identifiers:[N]` returns
+  only org N's groups. `_is_admin` (`user_management_service.py:149`) is
+  cluster-wide (no org filter) and user delete is cluster-wide, so "admin status
+  certified" is only complete if every org's groups are synced.
+- **Measured live** (same session): `users/search` user objects carry `privileges`,
+  `user_groups`, `user_inherited_groups` (group lists repeat per org). 57/200 users
+  hold `ADMINISTRATION`; 11 of those have no `Administrator`/`System User` group
+  direct or inherited — the cache name-match misses them even when certified (S65).
+  `TSUser` (`ts_client/models.py`) drops all three fields.
+- `groups_cache_authoritative` = the `_metadata_marker(..., entity_type="groups")`
+  identity pair, read before and after the count loop, over `(org_id,)` when org is
+  0/None and `(org_id, 0)` otherwise. Certifies `UserGroupMembership` for org N +
+  Primary only — NOT privilege-only admins nor admins of a third org (S65).
+  `/users/delete/preview` always returns False (no org; no frontend caller).
+- `_sync_groups` writes NO write-ahead IN_PROGRESS marker (only metadata does), so
+  its previous SUCCESS row survives a re-sync in flight; the before/after identity
+  catches only a sync that *completes* during the read. A cancel or failure upserts
+  FAILED. UI copy must not say "a groups sync is in progress".
+- `_sync_groups` writes SUCCESS (record_count=0) when the sweep returns zero groups
+  (it only skips the purge).
+- Test harness: `_FakeClient.groups_pages` in `tests/unit/test_user_management_service.py`
+  accepts `{org_id: [groups]}` pages; a real `run_sync(entity_type="groups", ...)`
+  works under `patched_env` once `ClusterConfig.build_auth_strategy` is monkeypatched.
+  `_write_sync_log` re-called inside an `_is_admin` hook bumps `synced_at` (race tests).
+- Users sync records `UserOrgMembership` only for the org being synced, so it cannot
+  enumerate all of a user's orgs.
+- Agent hazard: piping pytest through `tail` drops the exit code — redirect to a log.

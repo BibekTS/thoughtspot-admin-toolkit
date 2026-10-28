@@ -37,6 +37,7 @@ only when a human promotes them.
 | 2026-10-14 · S58+S60 (/improve-cycle, B4 batch) | 0 | 2 (S62, S63) | 54 open · 3 in-review · 2 feedback |
 | 2026-10-14 · S59 (/improve-cycle) | 0 | 1 (S64) | 54 open · 4 in-review · 2 feedback |
 | 2026-10-14 · S54/S55 criteria decision (human-directed, records-only) | 2 | 0 | 52 open · 4 in-review · 2 feedback |
+| 2026-10-27 · S46 (/improve-cycle, incl. B1 close of M11/S58/S60/S59) | 4 | 2 (S65, M19) | 53 open · 1 in-review · 2 feedback |
 
 ## ID taxonomy (mirrors the three standing goals)
 
@@ -64,7 +65,7 @@ an item reaches `done`, move its index line and detail entry to
 
 ## Index
 
-### Open (52)
+### Open (53)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
@@ -78,7 +79,6 @@ an item reaches `done`, move its index line and detail entry to
 | S28 | P2 | Bare-timestamp watermark cannot express 'not yet crawled' | — |
 | S29 | P2 | _persist_column_map delete-commit crash window | — |
 | S37 | P2 | BearerTokenAuth silently discards org_id | yes (`ts_admin/config.py`) |
-| S46 | P2 | Delete modal implies admin-status is certified when only metadata synced (in-progress) | — |
 | S38 | P2 | delete-tag-only is destructive with no dry-run | yes (`tests/integration/test_dryrun_safety.py`) |
 | S42 | P2 | No sync verifies the session org matches the stamped org_id | — |
 | S44 | P2 | A bulk share cannot be verified (bare 204) | — |
@@ -120,15 +120,14 @@ an item reaches `done`, move its index line and detail entry to
 | S62 | P3 | Sweep remaining warn-as-text sites to `--warn-text` | — |
 | S63 | P4 | RelationshipsView.runDeepIndex does not poll the deep-index job, so its warnings never toast | — |
 | S64 | P4 | Topbar page title collapses to 0px at ~800px viewport when the sync label is degraded | — |
+| S65 | P2 | Delete admin check is cache name-match only: misses privilege-only and other-org admins; verify live via users/search | — |
+| M19 | P3 | gate_evidence hook records `interrupted` (always False), never the real exit code | yes (`.claude/hooks/`) |
 
-### In review (4)
+### In review (1)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
-| M11 | P2 | A silently-degraded best-effort pass reports success at every level | — |
-| S58 | P3 | Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme) | — |
-| S60 | P3 | build_answer_index skips answers without surfacing a warning | — |
-| S59 | P3 | Topbar should show degraded lineage | — |
+| S46 | P2 | Delete modal implies admin-status is certified when only metadata synced | — |
 
 ### Done
 
@@ -412,36 +411,6 @@ Grid selection is silently lost past ~2,000 rows on the infinite row model. `pag
 
 **Acceptance criteria:** `BasicAuth`/`TrustedAuth` with `org_id=None` either default to `0` explicitly or log a warning naming the resolved org; after login the session's actual org is asserted via `GET /auth/session/user` -> `current_org.id` (see S42) and a mismatch fails loudly rather than silently caching another org's content. A unit test covers the `org_id=None` path
 
-### S46 — Delete modal implies admin-status is certified when only metadata synced
-
-`P2` · **in-progress** · protected: no
-
-The delete-user modal renders two cache-derived facts, but S31's completeness
-flag covers only one of them. `metadata_cache_authoritative` is computed from
-`entity_type="metadata"`, while `is_admin` / `admin_count` come from
-`UserGroupMembership` — written **only** by the *groups* sync. On the documented
-per-entity lazy-sync posture (metadata synced, groups never synced),
-`metadata_cache_authoritative` is `True`, so the delete modal shows no warning,
-no ADMIN badge and no admin acknowledgement, and `confirm_admin_delete` goes out
-`undefined`. Server-side `_delete_refusal` (`user_management_service.py:196-214`)
-builds its `admins` set from the same empty table and returns `None`, so a
-**cluster admin is deleted with no confirmation at all** — on a modal that S31
-has just taught to present itself as certified. The delete itself is
-pre-existing; what S31 changed is the *meaning* of a silent modal, from "we did
-not check" to "we checked and it is clean". Found by the correctness lens during
-the S31 review; deliberately not fixed in that diff to keep a destructive-path
-change reviewable.
-
-**Acceptance criteria:** The delete modal does not present admin status as
-verified when the groups cache is uncertified — a `groups_cache_authoritative`
-signal (`last_successful_sync(..., entity_type="groups")`, the same helper) is
-surfaced alongside the metadata one and participates in the warning and the
-acknowledgement gate; a test seeds a cluster with a SUCCESS **metadata** marker
-and NO groups marker, with a user who IS an admin upstream but has no
-`UserGroupMembership` row, and asserts the modal/preview does not report that
-user as non-admin without a caveat; the non-vacuity twin (both markers certified)
-asserts the admin IS flagged, so the fixture is proven capable of detecting one.
-
 ### S45 — COLLECTION objects are never synced
 
 `P3` · **open** · protected: no
@@ -598,11 +567,59 @@ Measured by the craft lens (S59 cycle): the Topbar page title is 29.9px wide on 
 
 **Acceptance criteria:** A title floor or a shorter/collapsing sync label at 800–1024px keeps a visible title stub, measured headless at 1024 and 800 in both the clean and degraded states; no regression of the S33 org-selector invariant; the <=640px overflow is measured and either fixed or documented.
 
+### S65 — Delete admin check is cache name-match only: misses privilege-only and other-org admins; verify live via users/search
+
+`P2` · **open** · protected: no
+
+`_is_admin` (`ts_admin/services/user_management_service.py:149-163`) treats a user as admin only by cached, direct membership of a group *named* `Administrator`/`System User`, cluster-wide. Measured live 2026-10-27 (SpotterCode, read-only, Primary org, `users/search` record_size 200): **57/200 users hold the `ADMINISTRATION` privilege and 11 of them have no `Administrator`/`System User` group direct or inherited** (custom groups grant it), so even a fully certified groups cache (S46) shows those admins as non-admin and `_delete_refusal` never asks for `confirm_admin_delete`. Also measured: every org has its own org-scoped `Administrator` group (241 orgs), so S46's `{org N, Primary}` certification still misses an admin of a third org K. The live data is free: `dryrun_delete` already pages `users/search`, whose user objects carry `privileges`, `user_groups`, `user_inherited_groups` — `TSUser` (`ts_admin/ts_client/models.py:106-118`) drops them. Server enforcement is also missing: S46/S31 gates are UI-only, so a direct API caller deletes an admin without confirmation (CLAUDE.md: verify live before executing).
+
+**Acceptance criteria:** `TSUser` carries `privileges` from `users/search`; the dry-run marks a user `is_admin` when their live `privileges` contain `ADMINISTRATION` (or the cache says so); `execute_delete` re-reads the targets live and refuses without `confirm_admin_delete` when any target holds `ADMINISTRATION`, regardless of cache certification; tests: a user with `ADMINISTRATION` via a custom group and no cached membership is flagged in the dry-run and refused at execute without confirmation (and the twin without the privilege proceeds); whether `privileges` is effective across orgs or per `current_org` is measured live and recorded in `docs/org-memory/codebase.md` before design.
+
+### M19 — gate_evidence hook records `interrupted` (always False), never the real exit code
+
+`P3` · **open** · protected: yes (`.claude/hooks/`)
+
+`.claude/hooks/gate_evidence.py:86` writes `exit={response.get("exit_code", response.get("interrupted", ""))}`; the Bash tool response carries no `exit_code`, so every entry in `.claude/evidence/<branch>.log` reads `exit=False` (the `interrupted` flag) — a red gate and a green gate look identical in the log the skill tells the CEO to quote as PR evidence. Found 2026-10-27 (S46 cycle): all ~40 entries in `improve__S46-groups-cache-authoritative.log` read `exit=False`, including runs that echoed non-zero codes.
+
+**Acceptance criteria:** The log records the command's real exit status (e.g. derived from the response's returncode field if present, else from the output, else marked `exit=unknown` — never the `interrupted` flag); a hook test feeds a failing and a passing response and asserts the two log lines differ; the improve-cycle skill's Phase 5 note is corrected if exit codes cannot be captured.
+
 ## In review
 
 _Rows sit here only while their PR is open; the
 next cycle's reconcile step moves merged rows to
 [BACKLOG_COMPLETED.md](BACKLOG_COMPLETED.md)._
+
+### S46 — Delete modal implies admin-status is certified when only metadata synced
+
+`P2` · **in-review** · protected: no
+
+The delete-user modal renders two cache-derived facts, but S31's completeness
+flag covers only one of them. `metadata_cache_authoritative` is computed from
+`entity_type="metadata"`, while `is_admin` / `admin_count` come from
+`UserGroupMembership` — written **only** by the *groups* sync. On the documented
+per-entity lazy-sync posture (metadata synced, groups never synced),
+`metadata_cache_authoritative` is `True`, so the delete modal shows no warning,
+no ADMIN badge and no admin acknowledgement, and `confirm_admin_delete` goes out
+`undefined`. Server-side `_delete_refusal` (`user_management_service.py:196-214`)
+builds its `admins` set from the same empty table and returns `None`, so a
+**cluster admin is deleted with no confirmation at all** — on a modal that S31
+has just taught to present itself as certified. The delete itself is
+pre-existing; what S31 changed is the *meaning* of a silent modal, from "we did
+not check" to "we checked and it is clean". Found by the correctness lens during
+the S31 review; deliberately not fixed in that diff to keep a destructive-path
+change reviewable.
+
+**Acceptance criteria:** The delete modal does not present admin status as
+verified when the groups cache is uncertified — a `groups_cache_authoritative`
+signal (`last_successful_sync(..., entity_type="groups")`, the same helper) is
+surfaced alongside the metadata one and participates in the warning and the
+acknowledgement gate; a test seeds a cluster with a SUCCESS **metadata** marker
+and NO groups marker, with a user who IS an admin upstream but has no
+`UserGroupMembership` row, and asserts the modal/preview does not report that
+user as non-admin without a caveat; the non-vacuity twin (both markers certified)
+asserts the admin IS flagged, so the fixture is proven capable of detecting one.
+
+**2026-10-27 (`/improve-cycle`).** Implemented on `improve/S46-groups-cache-authoritative` (`83149ae`, `aa61ab4`, `54dcaf7`). `groups_cache_authoritative` (same `_metadata_marker` identity helper, `entity_type="groups"`) is surfaced on the dry-run result and `/users/delete/preview`, and gates a new banner sentence + a third acknowledgement in `DeleteUsersModal`. Review Board CONFIRMED (and CEO measured live) that each org has its own `Administrator` group while `_is_admin` is cluster-wide, so for org N≠0 the flag also requires a stable org-0 (Primary) groups marker. UI-only, like S31: a direct API caller on a lazy-synced cluster can still delete an upstream admin without `confirm_admin_delete` (pre-existing; S65). Residual scope: certifies org N + Primary only; admins of a third org K and privilege-only admins are not verified (S65).
 
 ## Feedback (user-reported)
 
@@ -614,36 +631,6 @@ instead of getting its own work stream. Same bright-line rules as above.
 Batch 1 received 2026-08-24 (SE Demo evaluation). Triage 2026-08-24: none fully
 done; F3/F6/F11 partially covered or already filed.
 
-
-### M11 — A silently-degraded best-effort pass reports success at every level
-
-`P2` · **in-review** · protected: no
-
-A best-effort pass that fails silently reports success at every level, and no gate catches it. `_sync_dependencies` swallows the column-map failure by design (the object tier must survive), so on a cluster where the TML pass aborted every time the job read COMPLETE, the Topbar read "Synced 2m ago", and the cache held 9,247 USES edges with **zero** CONNECTS and zero column rows. The full verification bar was green throughout — unit tests exercise the pass against canned TML that never fails, so the all-or-nothing batch flaw and the Model-alias parse gap were both invisible. Partially addressed (`column_error` now rides in the job result), but nothing asserts a degraded pass is visible to the user
-
-**Acceptance criteria:** Either a gate or a guard test makes a silently-degraded sync detectable: a `dependencies` sync whose column pass fails does not present as a clean COMPLETE in the Jobs UI, and the org's test conventions require best-effort passes to be exercised against a failing dependency, not only a happy-path fake
-
-**2026-10-14 (`/improve-cycle M11`).** Implemented on `improve/M11-degraded-sync-visible` (commits `aee8d27`, `2c3fb10`): signal = `result["warnings"]` on COMPLETE `dependencies` jobs + a WARNINGS pill in the Jobs UI + a warning toast. Criteria met per the Review Board.
-
-### S58 — Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme)
-
-`P3` · **in-review** · protected: no
-
-`--warn` / `--warn-soft` text measures 2.76:1 / 3.06:1 in the light theme, failing the DESIGN.md 4.5:1 text contrast bar. Affects the PARTIAL pill and the Topbar connecting status; the M11 WARNINGS pill would inherit it. Filed 2026-10-14 against main (M11 cycle).
-
-**Acceptance criteria:** A new `--warn-text` token reaches 4.5:1 on `warn-soft` and on the surface in BOTH themes, and is used by the PARTIAL pill, the WARNINGS pill and the Topbar connecting status; contrast ratios are recorded in the PR; `npx tsc --noEmit` and `npm run build` pass.
-
-**2026-10-14 (`/improve-cycle`, B4 batch).** Implemented on `improve/S58-S60-warn-token-answer-index-warnings` (`7b5d6b3`). `--warn-text`: light `#855500` (5.75:1 on warn-soft, 6.37:1 on surface), dark `#e0b25a` (7.82:1 / 8.86:1). Applied to the PARTIAL pill and WARNINGS pill (JobsList), `.status[data-state=connecting]`, and the Topbar stale-sync colour (beyond the named criteria, same bug). Guard test: `frontend/lib/theme/contrast.test.ts`. About 20 other warn-as-text sites deliberately NOT swept: see S62.
-
-### S60 — build_answer_index skips answers without surfacing a warning
-
-`P3` · **in-review** · protected: no
-
-`build_answer_index` sets `failed_exports` but no `result["warnings"]`, so skipped answers read as a clean COMPLETE (the M11 channel only covers the column-map pass). Filed 2026-10-14 against main (M11 cycle).
-
-**Acceptance criteria:** A dependencies sync in which `build_answer_index` skipped answers because their export failed completes with `result["warnings"]` naming the count; a unit test drives a failing export and asserts the warning; a clean run sets no `warnings` key.
-
-**2026-10-14 (`/improve-cycle`, B4 batch).** Implemented on `improve/S58-S60-warn-token-answer-index-warnings` (`7b5d6b3`). BUT the criteria say 'dependencies sync' while `build_answer_index` only runs in the `lineage_deep_index` job (`run_deep_index`), so the behaviour is implemented on the deep-index job; the criteria wording needs a human edit. `RelationshipsView.runDeepIndex` does not poll the job, so no toast (not in scope; see S63).
 
 ### F2 — Connection + external db/schema/table on the table list and in lineage
 
@@ -983,14 +970,4 @@ Unmet criterion, exactly one: *"must resolve, not worsen, S41."* Manual (non-sel
   never `confirm_write_operations` in a cycle. S33's lessons landed as defaults
   too: CEO writes no product code; visual changes need a measured visual
   artifact; new-row criteria are written against `main`.
-
-### S59 — Topbar should show degraded lineage
-
-`P3` · **in-review** · protected: no
-
-The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCCESS; `buildSyncLabel` / `buildSyncColor` do not surface it, so a degraded lineage reads as 'Synced 2m ago'. Audit the SUCCESS-gated consumers (`sync_status.py`, `RelationshipsView` `lineageBuilt`) for the same blind spot. Filed 2026-10-14 against main (M11 cycle).
-
-**Acceptance criteria:** A SyncLog with status SUCCESS and a non-empty `error` renders a distinct degraded label/color in the Topbar (covered in the Topbar label test); the SUCCESS-gated consumers `sync_status.py` and `RelationshipsView` `lineageBuilt` are audited and each either handles the degraded case or is documented as correct; both themes checked.
-
-**2026-10-14 (`/improve-cycle S59`).** Implemented on `improve/S59-topbar-degraded-lineage` (commits `c1139ad`, `bec1ad1` + status-dot `flexShrink: 0` fix). Premise correction: nothing wrote `SyncLog.error` on a SUCCESS row before; added `lineage_service.mark_dependencies_degraded` (filters cluster_id + org_id + entity_type, `SQLAlchemyError` only), called from `_sync_dependencies` when warnings exist or the column pass was cancelled (marker 'Column lineage pass was cancelled'). Topbar label 'Synced <age> · no column lineage' (the original 'lineage incomplete' broke the 800px layout), dot + label colour `warnText`. `sync_status.py` consumers audited: they read only the 'metadata' row (correct as-is, commented). `RelationshipsView` `lineageBuilt` = SUCCESS only, intentionally independent of phase 2 (commented). Settings has no sync page; no other frontend reader of `SyncLog.error`. Criteria ('distinct degraded' label/colour) met.
 
