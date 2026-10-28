@@ -359,3 +359,64 @@ Reproduced by the M18 correctness reviewer by feeding a list.
 `tests/unit/test_gate_evidence_hook.py` covers both shapes.
 
 **Status:** unpromoted
+
+### Groups sync has no write-ahead marker, so a re-sync in flight reads as certified
+`CONFIRMED` · measured against `54dcaf7` on 2026-10-27 · lens: correctness (S46 review)
+
+**Failure scenario:** A groups re-sync is running; group A (user removed from it)
+has been rewritten, group B (user newly added) not yet. The previous SUCCESS marker
+is unchanged for the whole run, so `groups_cache_authoritative` is True while
+`_is_admin` reads a torn snapshot and the user shows as a certified non-admin.
+
+**Evidence:** `ts_admin/services/sync_service.py:270-399` writes only SUCCESS/FAILED
+(metadata writes IN_PROGRESS at ~:437); memberships are rewritten per group per commit.
+
+**Drafted acceptance criteria:** `_sync_groups` writes a write-ahead IN_PROGRESS
+marker (as metadata does) so `last_successful_sync(entity_type="groups")` is None
+while a groups sync runs; a test asserts the flag reads False mid-sync and True after.
+
+**Status:** unpromoted
+
+### `_sync_groups` certifies an empty sweep as SUCCESS
+`CONFIRMED` (code trace; harm PLAUSIBLE) · measured against `54dcaf7` on 2026-10-27 · lens: security (S46 review)
+
+**Failure scenario:** `groups/search` for org N returns zero groups (a scoping or
+permission fault — every real org has at least an `Administrator` group, measured
+live 2026-10-27). The sync skips the purge but writes SUCCESS, record_count 0, so
+S46's groups flag certifies an empty membership cache.
+
+**Evidence:** `ts_admin/services/sync_service.py:375-397`.
+
+**Drafted acceptance criteria:** A groups sweep that returns zero groups ends
+PARTIAL/FAILED (or writes a degraded marker) rather than SUCCESS; a unit test drives
+an empty `search_groups` and asserts `last_successful_sync(entity_type="groups")` is None.
+
+**Status:** unpromoted
+
+### Delete modal can stack three identical acknowledgement boxes
+`CONFIRMED` (code read; layout unmeasured) · measured against `54dcaf7` on 2026-10-27 · lens: craft (S46 review)
+
+**Failure scenario:** Admin target + uncertified metadata + uncertified groups:
+the confirming step shows three danger-soft checkboxes with identical styling and a
+~130-word banner, with no hierarchy; on a 768px-high viewport Confirm may scroll out.
+
+**Evidence:** `frontend/components/Users/DeleteUsersModal.tsx` banner + ack blocks.
+
+**Drafted acceptance criteria:** Measured headless at 768px height in the worst
+case, the Confirm button stays in view; the banner splits to one line per concern;
+the three ack labels share one local component (also the simplicity lens's
+`AckBox` extraction), with distinct spacing.
+
+**Status:** unpromoted
+
+### `_metadata_marker` now serves groups too — misleading name
+`CONFIRMED` · measured against `54dcaf7` on 2026-10-27 · lens: simplicity (S46 review)
+
+**Failure scenario:** None at runtime; a reader assumes the helper is metadata-only.
+
+**Evidence:** `ts_admin/services/user_management_service.py` `_metadata_marker(..., entity_type=)`.
+
+**Drafted acceptance criteria:** Renamed to `_sync_marker` (call sites + docstrings), no behaviour change, suite green.
+
+**Status:** unpromoted
+

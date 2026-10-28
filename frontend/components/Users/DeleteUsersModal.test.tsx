@@ -36,7 +36,7 @@ const USERS = [
 ] as unknown as UserListItem[];
 
 /** The S31 shape: users resolve fine, every owned-object count is a bare 0. */
-function result(): Omit<DeleteDryRunResult, "metadata_cache_authoritative"> {
+function result(): Omit<DeleteDryRunResult, "metadata_cache_authoritative" | "groups_cache_authoritative"> {
   return {
     total: 1,
     items: [
@@ -78,7 +78,12 @@ async function renderWithResult(body: Record<string, unknown>) {
 }
 
 async function renderWith(metadataCacheAuthoritative: boolean) {
-  await renderWithResult({ ...result(), metadata_cache_authoritative: metadataCacheAuthoritative });
+  // groups certified, so the S31 tests above isolate the metadata flag.
+  await renderWithResult({
+    ...result(),
+    metadata_cache_authoritative: metadataCacheAuthoritative,
+    groups_cache_authoritative: true,
+  });
 }
 
 /** Advance to the typed-DELETE step and type it. */
@@ -92,6 +97,9 @@ const WARNING = /Owned-object counts may be incomplete/;
  *  unambiguous once an admin (a second checkbox) is in the fixture. */
 const ACK = { name: /uncertified owned-object counts/ };
 const ackCheckbox = () => screen.queryByRole("checkbox", ACK);
+// S46: admin status (groups cache) has its own banner sentence and acknowledgement.
+const ADMIN_WARNING = /Admin status is not verified/;
+const ADMIN_ACK = { name: /unverified admin status/ };
 const confirmButton = () => screen.getByRole("button", { name: "Confirm delete" });
 
 describe("DeleteUsersModal — uncertified cache", () => {
@@ -132,9 +140,11 @@ describe("DeleteUsersModal — uncertified cache", () => {
     await renderWith(true);
 
     expect(screen.queryByText(WARNING)).not.toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_WARNING)).not.toBeInTheDocument();
 
     armConfirm();
     expect(ackCheckbox()).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", ADMIN_ACK)).not.toBeInTheDocument();
     expect(confirmButton()).not.toBeDisabled();
   });
 
@@ -194,6 +204,7 @@ describe("DeleteUsersModal — uncertified cache", () => {
 
     expect(screen.getByText("upstream exploded")).toBeInTheDocument();
     expect(screen.queryByText(WARNING)).not.toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_WARNING)).not.toBeInTheDocument(); // null, not false
   });
 
   it("shows the error alone when the poll throws — no cache banner", async () => {
@@ -202,5 +213,41 @@ describe("DeleteUsersModal — uncertified cache", () => {
 
     expect(screen.getByText("Lost connection while checking impact")).toBeInTheDocument();
     expect(screen.queryByText(WARNING)).not.toBeInTheDocument();
+    expect(screen.queryByText(ADMIN_WARNING)).not.toBeInTheDocument(); // null, not false
+  });
+
+  // ── S46: metadata certified != admin status certified ──────────────────────
+
+  it("warns about unverified admin status alone when only the groups cache is uncertified", async () => {
+    await renderWithResult({
+      ...result(),
+      metadata_cache_authoritative: true,
+      groups_cache_authoritative: false,
+    });
+
+    expect(screen.getByText(ADMIN_WARNING)).toBeInTheDocument();
+    expect(screen.queryByText(WARNING)).not.toBeInTheDocument();
+
+    armConfirm();
+    expect(screen.getByRole("checkbox", ADMIN_ACK)).toBeInTheDocument();
+    expect(confirmButton()).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("checkbox", ADMIN_ACK));
+    expect(screen.getByRole("checkbox", ADMIN_ACK)).toBeChecked();
+    expect(confirmButton()).not.toBeDisabled();
+  });
+
+  it.each([
+    ["MISSING", undefined],
+    ["a NON-BOOLEAN", "false"],
+  ])("treats a %s groups field as unverified, not as certified", async (_label, value) => {
+    // Kills `!== false` (missing => certified) and `!!x` ("false" => certified).
+    await renderWithResult({ ...result(), metadata_cache_authoritative: true, groups_cache_authoritative: value });
+
+    expect(screen.getByText(ADMIN_WARNING)).toBeInTheDocument();
+
+    armConfirm();
+    expect(screen.getByRole("checkbox", ADMIN_ACK)).toBeInTheDocument();
+    expect(confirmButton()).toBeDisabled();
   });
 });

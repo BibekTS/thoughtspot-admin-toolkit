@@ -59,3 +59,4 @@ rows say "landed (edits unknown)" and do not count toward the ≥80% landed-clea
 | 2026-10-14 | improve/S58-S60-warn-token-answer-index-warnings | #74 | landed (edits unknown) | unknown | see PR | no | n/a |
 | 2026-10-14 | improve/S59-topbar-degraded-lineage | #75 | landed (edits unknown) | unknown | see PR | no | n/a |
 | 2026-10-14 | records/S54-S55-criteria-decision | #76 | landed (edits unknown) | unknown | see PR | no | n/a |
+| 2026-10-27 | improve/S46-groups-cache-authoritative | #82 | open | — | 1 (F1 per-org admin gap, fixed) | no | ~12 agent runs |

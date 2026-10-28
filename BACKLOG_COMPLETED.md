@@ -9,7 +9,7 @@ detail entry here.
 
 ## Index
 
-### Done items (44)
+### Done items (48)
 
 | ID | P | Item | Protected |
 |----|---|------|-----------|
@@ -57,6 +57,10 @@ detail entry here.
 | S51 | P1 | Per-cluster ThoughtSpot API limiter (interactive/background lanes, cluster-wide 429 pause, Retry-After HTTP-date, deep-index in-flight 409) | — |
 | S54 | P1 | Resync one object's lineage — backend endpoint (Review Board) | — |
 | S55 | P2 | Resync lineage button in Relationships view | — |
+| M11 | P2 | A silently-degraded best-effort pass reports success at every level | — |
+| S58 | P3 | Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme) | — |
+| S60 | P3 | build_answer_index skips answers without surfacing a warning | — |
+| S59 | P3 | Topbar should show degraded lineage | — |
 
 ## Completed items
 
@@ -624,3 +628,51 @@ UI over S54. A "Re-sync lineage" (force) action in the root-object header of `fr
 **Reopened 2026-10-14 (reconcile).** PR #68 merged, but the criteria are only partly met on main. Unmet: `resyncObject` sends no `force=true` (the backend has no `force` param); errors surface as a toast, not an inline error state; both-themes / tokens-only unverified. If the shipped design deliberately dropped these, the criteria text needs a human edit rather than code.
 
 **Criteria amended 2026-10-14 (human-directed, with S54).** (1) `force=true` dropped with S54's `force` param (every resync forces). (2) Errors and `export_failed` surface as toasts rather than an inline error state: the existing graph stays visible and the message is plain ("ThoughtSpot couldn't export this object; existing lineage kept."), consistent with the app's toast pattern. Tokens-only verified by diff (PR #68 adds no hex/rgb literals; only toasts and an existing button); both themes not visually checked. Met per reconcile: action in the root-object header, graph refetch on success, disabled while in flight. Closed done.
+
+### M11 — A silently-degraded best-effort pass reports success at every level
+
+`P2` · **done** · protected: no
+
+A best-effort pass that fails silently reports success at every level, and no gate catches it. `_sync_dependencies` swallows the column-map failure by design (the object tier must survive), so on a cluster where the TML pass aborted every time the job read COMPLETE, the Topbar read "Synced 2m ago", and the cache held 9,247 USES edges with **zero** CONNECTS and zero column rows. The full verification bar was green throughout — unit tests exercise the pass against canned TML that never fails, so the all-or-nothing batch flaw and the Model-alias parse gap were both invisible. Partially addressed (`column_error` now rides in the job result), but nothing asserts a degraded pass is visible to the user
+
+**Acceptance criteria:** Either a gate or a guard test makes a silently-degraded sync detectable: a `dependencies` sync whose column pass fails does not present as a clean COMPLETE in the Jobs UI, and the org's test conventions require best-effort passes to be exercised against a failing dependency, not only a happy-path fake
+
+**2026-10-14 (`/improve-cycle M11`).** Implemented on `improve/M11-degraded-sync-visible` (commits `aee8d27`, `2c3fb10`): signal = `result["warnings"]` on COMPLETE `dependencies` jobs + a WARNINGS pill in the Jobs UI + a warning toast. Criteria met per the Review Board.
+
+**Closed 2026-10-27 (B1 reconcile, S46 cycle).** PR merged; every criterion re-verified on `main` d6f65bd with a pinning test.
+
+### S58 — Add a text-safe warn token (`--warn` text fails 4.5:1 in light theme)
+
+`P3` · **done** · protected: no
+
+`--warn` / `--warn-soft` text measures 2.76:1 / 3.06:1 in the light theme, failing the DESIGN.md 4.5:1 text contrast bar. Affects the PARTIAL pill and the Topbar connecting status; the M11 WARNINGS pill would inherit it. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A new `--warn-text` token reaches 4.5:1 on `warn-soft` and on the surface in BOTH themes, and is used by the PARTIAL pill, the WARNINGS pill and the Topbar connecting status; contrast ratios are recorded in the PR; `npx tsc --noEmit` and `npm run build` pass.
+
+**2026-10-14 (`/improve-cycle`, B4 batch).** Implemented on `improve/S58-S60-warn-token-answer-index-warnings` (`7b5d6b3`). `--warn-text`: light `#855500` (5.75:1 on warn-soft, 6.37:1 on surface), dark `#e0b25a` (7.82:1 / 8.86:1). Applied to the PARTIAL pill and WARNINGS pill (JobsList), `.status[data-state=connecting]`, and the Topbar stale-sync colour (beyond the named criteria, same bug). Guard test: `frontend/lib/theme/contrast.test.ts`. About 20 other warn-as-text sites deliberately NOT swept: see S62.
+
+**Closed 2026-10-27 (B1 reconcile, S46 cycle).** PR merged; every criterion re-verified on `main` d6f65bd with a pinning test.
+
+### S60 — build_answer_index skips answers without surfacing a warning
+
+`P3` · **done** · protected: no
+
+`build_answer_index` sets `failed_exports` but no `result["warnings"]`, so skipped answers read as a clean COMPLETE (the M11 channel only covers the column-map pass). Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A dependencies sync in which `build_answer_index` skipped answers because their export failed completes with `result["warnings"]` naming the count; a unit test drives a failing export and asserts the warning; a clean run sets no `warnings` key.
+
+**2026-10-14 (`/improve-cycle`, B4 batch).** Implemented on `improve/S58-S60-warn-token-answer-index-warnings` (`7b5d6b3`). BUT the criteria say 'dependencies sync' while `build_answer_index` only runs in the `lineage_deep_index` job (`run_deep_index`), so the behaviour is implemented on the deep-index job; the criteria wording needs a human edit. `RelationshipsView.runDeepIndex` does not poll the job, so no toast (not in scope; see S63).
+
+**Closed 2026-10-27 (B1 reconcile, S46 cycle).** PR merged; every criterion re-verified on `main` d6f65bd with a pinning test.
+
+### S59 — Topbar should show degraded lineage
+
+`P3` · **done** · protected: no
+
+The lineage build writes `SyncLog.error` after phase 2 while keeping status SUCCESS; `buildSyncLabel` / `buildSyncColor` do not surface it, so a degraded lineage reads as 'Synced 2m ago'. Audit the SUCCESS-gated consumers (`sync_status.py`, `RelationshipsView` `lineageBuilt`) for the same blind spot. Filed 2026-10-14 against main (M11 cycle).
+
+**Acceptance criteria:** A SyncLog with status SUCCESS and a non-empty `error` renders a distinct degraded label/color in the Topbar (covered in the Topbar label test); the SUCCESS-gated consumers `sync_status.py` and `RelationshipsView` `lineageBuilt` are audited and each either handles the degraded case or is documented as correct; both themes checked.
+
+**2026-10-14 (`/improve-cycle S59`).** Implemented on `improve/S59-topbar-degraded-lineage` (commits `c1139ad`, `bec1ad1` + status-dot `flexShrink: 0` fix). Premise correction: nothing wrote `SyncLog.error` on a SUCCESS row before; added `lineage_service.mark_dependencies_degraded` (filters cluster_id + org_id + entity_type, `SQLAlchemyError` only), called from `_sync_dependencies` when warnings exist or the column pass was cancelled (marker 'Column lineage pass was cancelled'). Topbar label 'Synced <age> · no column lineage' (the original 'lineage incomplete' broke the 800px layout), dot + label colour `warnText`. `sync_status.py` consumers audited: they read only the 'metadata' row (correct as-is, commented). `RelationshipsView` `lineageBuilt` = SUCCESS only, intentionally independent of phase 2 (commented). Settings has no sync page; no other frontend reader of `SyncLog.error`. Criteria ('distinct degraded' label/colour) met.
+
+**Closed 2026-10-27 (B1 reconcile, S46 cycle).** PR merged; every criterion re-verified on `main` d6f65bd with a pinning test.
