@@ -1,0 +1,60 @@
+{
+  "agent_org_version": "0.1.0",
+  "generated": "2026-10-27",
+  "adopted_from": "hand-built improve-cycle org (2026-07-16, PR #13)",
+  "project": "ThoughtSpot Admin Toolkit",
+  "slug": "admin-toolkit",
+  "size": "full",
+  "ceo_skill": "improve-cycle",
+  "base_branch": "main",
+  "branch_prefix": "improve/",
+  "autonomy_level": "L1",
+  "autonomy_target": "L2",
+  "models": { "top": "opus", "mid": "sonnet", "small": "haiku" },
+  "gates": [
+    { "name": "lint", "cmd": "ruff check ts_admin/ tests/", "when": "always", "cheap": true },
+    { "name": "format", "cmd": "ruff format --check ts_admin/ tests/", "when": "always", "cheap": true },
+    { "name": "unit", "cmd": "pytest tests/unit/ -v", "when": "always", "cheap": true },
+    { "name": "integration", "cmd": "pytest tests/integration/ -v", "when": "always", "cheap": true, "note": "in-memory TestClient, binds no port" },
+    { "name": "typecheck", "cmd": "cd frontend && npx tsc --noEmit", "when": "always", "cheap": true },
+    { "name": "build", "cmd": "cd frontend && npm run build", "when": "always", "cheap": false, "note": "writes ts_admin/static/; QA only, never in parallel worktrees" },
+    { "name": "feature-check", "cmd": "", "when": "always", "note": "supplied by the CEO's brief per backlog row; /test for the coverage-aware slice" }
+  ],
+  "gate_files": ["frontend/tsconfig.json", "frontend/vitest.config.mts", "frontend/playwright.config.ts"],
+  "protected_paths": ["CLAUDE.md", ".github/workflows/**", ".env*",
+    "ts_admin/main.py", "ts_admin/services/cluster_service.py", "ts_admin/cli.py", "ts_admin/config.py",
+    "tests/integration/test_dryrun_safety.py", "tests/integration/test_cluster_isolation.py",
+    "tests/integration/test_audit_log_writes.py", "tests/unit/test_cluster_service.py",
+    ".claude/ceo/org.json", ".claude/ceo/AUTONOMY.md", ".claude/settings.json", ".claude/hooks/**"],
+  "user_data_paths": ["~/.ts-admin/**"],
+  "shipped_paths_note": "The wheel ships only ts_admin/ (pyproject [tool.hatch] packages); CLAUDE.md and .claude/ never reach end users.",
+  "stores": {
+    "rules": "CLAUDE.md",
+    "tasks": "BACKLOG.md",
+    "facts": "docs/org-memory/",
+    "note": "Adopted org: the .claude/ceo/ backlog and memory files are pointers to these stores, not copies."
+  },
+  "agents": [
+    { "name": "researcher", "access": "report-only", "role": "researcher", "perimeter": [], "except": [] },
+    { "name": "architect", "access": "report-only", "role": "architect", "perimeter": [], "except": [] },
+    { "name": "implementer", "access": "editor", "role": "editor",
+      "perimeter": ["ts_admin/**", "tests/**", "frontend/**", "docs/**"],
+      "except": ["ts_admin/static/**"] },
+    { "name": "reviewer", "access": "report-only", "role": "reviewer", "perimeter": [], "except": [] },
+    { "name": "qa-verifier", "access": "report-only", "role": "release-manager", "perimeter": [], "except": [] },
+    { "name": "bug-hunter", "access": "report-only", "role": "bug-hunter", "perimeter": [], "except": [] }
+  ],
+  "skills": {
+    "ponytail": { "agents": ["implementer", "architect", "reviewer"], "when": "simplicity lens; reuse ladder before new code", "fallback": "apply the reuse/YAGNI checklist in the agent file" },
+    "taste-skill": { "agents": ["implementer", "architect", "reviewer"], "when": "craft lens on frontend diffs", "fallback": "docs/dev/DESIGN.md" }
+  },
+  "playbooks": ".claude/ceo/playbooks",
+  "feedback": { "enabled": true, "upstream": "BbekShr/agent-org" },
+  "default_owner": "implementer",
+  "kind": "web app (local FastAPI service + static Next.js UI, pip-installed)",
+  "modes": ["light", "id", "N", "discover", "discover fix"],
+  "guard": {
+    "block_stash": true,
+    "stop_check": { "cmd": "", "watch": ["ts_admin", "frontend"], "extensions": [".py", ".ts", ".tsx"] }
+  }
+}

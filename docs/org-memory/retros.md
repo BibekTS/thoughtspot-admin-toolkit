@@ -277,3 +277,6 @@ One line per cycle on process friction. Format:
 - 2026-10-14 · S58+S60 batch: architect skipped (briefs were specific; CEO wrote the plan file); all five reviewers used their own worktrees this time (M8 friction resolved); QA exit codes now captured via log files instead of `| tail`.
 
 - 2026-10-14 · S59: researcher caught a wrong row premise (nothing wrote SyncLog.error); security reviewer skipped its worktree again despite instruction; craft headless measurement caught a layout break no gate sees (800px), and the re-measure caught a dot-shrink the fix itself introduced.
+
+- 2026-10-27 · Adoption into agent-org (`/org-init adopt`, branch org/bootstrap-2026-10-27): baseline on main @c70910b: ruff check + format clean (129 files), 685 unit + 290 integration passed, tsc clean (build not run); existing stores kept (BACKLOG.md, docs/org-memory/), `.claude/ceo/` added with pointers. Friction: org-doctor only recognizes `<slug>-*` agent names, so all six unprefixed agents warn as "never mentioned" (logged in `.claude/ceo/upstream.md`); `pyproject.toml` holds both gate config and deps, so ruff/pytest config can't be put under the edit guard without blocking upgrades (also logged).
+  Note: `git stash` (used in the 2026-07-15 W2 rebase above) is now blocked by `org_guard.py` during runs; use a WIP commit or a detached worktree.
