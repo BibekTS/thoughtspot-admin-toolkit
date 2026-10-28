@@ -147,8 +147,7 @@ export function DeleteUsersModal({
 
   // NOTE on state lifetime: `pages/users.tsx` renders this modal under
   // `{action === "delete" && <DeleteUsersModal .../>}`, so closing UNMOUNTS it
-  // and every piece of state above (including `confirmStaleCache`,
-  // `confirmAdminUnverified` and `confirmAdmin`) resets on the next open. The acknowledgement gate relies on
+  // and all of this component's state resets on the next open. The acknowledgement gates rely on
   // that. If a "change the selection without closing the modal" affordance is
   // ever added, a ticked acknowledgement would carry forward onto a different
   // set of users and a fresh dry-run — re-set these explicitly at that point.
@@ -341,8 +340,8 @@ export function DeleteUsersModal({
                 style={{ marginTop: 2, flexShrink: 0 }}
               />
               <span>
-                I understand admin status above is not verified and one of these users may be a
-                ThoughtSpot admin.
+                I understand admin status above is not verified — a user without an ADMIN badge may
+                still be a ThoughtSpot admin.
               </span>
             </label>
           )}

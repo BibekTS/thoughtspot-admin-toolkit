@@ -233,6 +233,7 @@ describe("DeleteUsersModal — uncertified cache", () => {
     expect(confirmButton()).toBeDisabled();
 
     fireEvent.click(screen.getByRole("checkbox", ADMIN_ACK));
+    expect(screen.getByRole("checkbox", ADMIN_ACK)).toBeChecked();
     expect(confirmButton()).not.toBeDisabled();
   });
 

@@ -41,7 +41,7 @@ class _FakeClient:
     delete_user_should_fail: set[str] = set()
     delete_attempts: dict[str, int] = {}
     users_pages: list[list] = []  # pages of objects with .id and .name (for search_users)
-    groups_pages: list[list] = []  # pages of group objects (for search_groups, real groups sync)
+    groups_pages: list = []  # pages of group objects, or {org_id: [groups]} (search_groups)
     assign_should_fail: Exception | None = None
     assign_fail_guids: set = set()
     live_user: object = None
@@ -108,8 +108,9 @@ class _FakeClient:
             yield page
 
     async def search_groups(self, *, org_id=None):
+        # A page is a list of groups, or {org_id: [groups]} to differ per org.
         for page in _FakeClient.groups_pages:
-            yield page
+            yield page.get(org_id, []) if isinstance(page, dict) else page
 
 
 @pytest.fixture(autouse=True)
@@ -1766,37 +1767,105 @@ class TestGroupsCacheAuthoritative:
         preview = svc.preview_delete(cluster_id="c1", user_guids=["u-root"], org_id=0)
         assert preview["groups_cache_authoritative"] is False
 
+    @staticmethod
+    def _admin_group() -> SimpleNamespace:
+        now = datetime.now(timezone.utc)
+        return SimpleNamespace(
+            id="g-admin",
+            name="Administrator",
+            display_name="Administrator",
+            description="",
+            privileges=["ADMINISTRATION"],
+            member_users=["u-root"],
+            author_id="u-root",
+            created=now,
+            modified=now,
+        )
+
+    @staticmethod
+    def _sync_groups(in_memory_db, monkeypatch, org_id: int) -> None:
+        from ts_admin.services.sync_service import run_sync
+
+        monkeypatch.setattr("ts_admin.config.ClusterConfig.build_auth_strategy", lambda self, org_id=None: None)
+        job_id = _create_job("sync_groups", {})
+        asyncio.run(run_sync(entity_type="groups", org_id=org_id, job_id=job_id, cluster_id="c1"))
+        with Session(in_memory_db) as s:
+            assert s.get(Job, job_id).status == "COMPLETE"
+
+    @staticmethod
+    def _dryrun_org(in_memory_db, org_id: int) -> dict:
+        from ts_admin.services.user_management_service import dryrun_delete
+
+        job_id = _create_job("user_delete_dryrun", {"cluster_id": "c1", "org_id": org_id})
+        asyncio.run(dryrun_delete(job_id=job_id, cluster_id="c1", org_id=org_id, user_guids=["u-root"]))
+        with Session(in_memory_db) as s:
+            return s.get(Job, job_id).get_result()
+
     def test_real_groups_sync_certifies_and_flags_the_admin(self, in_memory_db, root_only, monkeypatch):
         """Kills: vacuous fixture; hardcoded False; "group" vs "groups" typo;
         helper ignoring entity_type."""
-        from ts_admin.services.sync_service import run_sync
-
-        now = datetime.now(timezone.utc)
-        _FakeClient.groups_pages = [
-            [
-                SimpleNamespace(
-                    id="g-admin",
-                    name="Administrator",
-                    display_name="Administrator",
-                    description="",
-                    privileges=["ADMINISTRATION"],
-                    member_users=["u-root"],
-                    author_id="u-root",
-                    created=now,
-                    modified=now,
-                )
-            ]
-        ]
-        monkeypatch.setattr("ts_admin.config.ClusterConfig.build_auth_strategy", lambda self, org_id=None: None)
-        job_id = _create_job("sync_groups", {})
-        asyncio.run(run_sync(entity_type="groups", org_id=0, job_id=job_id, cluster_id="c1"))
-        with Session(in_memory_db) as s:
-            assert s.get(Job, job_id).status == "COMPLETE"
+        _FakeClient.groups_pages = [[self._admin_group()]]
+        self._sync_groups(in_memory_db, monkeypatch, 0)
 
         result = self._dryrun(in_memory_db)
         assert result["groups_cache_authoritative"] is True
         assert result["items"][0]["is_admin"] is True
         assert result["admin_count"] == 1
+
+    @pytest.fixture
+    def root_in_org5(self, in_memory_db, root_only):
+        with Session(in_memory_db) as s:
+            s.add(UserOrgMembership(cluster_id="c1", ts_guid="u-root", org_id=5, synced_at=datetime.now(timezone.utc)))
+            s.add(SyncLog(cluster_id="c1", org_id=5, entity_type="metadata", status="SUCCESS", record_count=0))
+            s.commit()
+
+    def test_org_n_groups_sync_alone_does_not_certify_a_primary_admin(self, in_memory_db, root_in_org5, monkeypatch):
+        """F1: each org has its OWN Administrator group, and `_is_admin` is
+        cluster-wide. Org 5 synced, Primary (org 0) never synced: the user is a
+        Primary admin the cache cannot see, so the flag must be False.
+        Kills: dropping the org-0 requirement in `preview_delete`."""
+        from ts_admin.services import user_management_service as svc
+
+        _FakeClient.groups_pages = [{5: []}]  # org 5 has no admin group; org 0 is never synced
+        self._sync_groups(in_memory_db, monkeypatch, 5)
+
+        # Strength: the org-N marker alone IS certified — only the org-0 requirement makes this False.
+        with Session(in_memory_db) as s:
+            assert svc._metadata_marker(s, cluster_id="c1", org_id=5, entity_type="groups") is not None
+        result = self._dryrun_org(in_memory_db, 5)
+        assert result["items"][0]["is_admin"] is False
+        assert result["groups_cache_authoritative"] is False
+
+    def test_org_n_and_primary_groups_synced_certifies_and_flags_the_admin(
+        self, in_memory_db, root_in_org5, monkeypatch
+    ):
+        """Twin of the above: with org 0 synced too, the flag is True and is_admin is True."""
+        _FakeClient.groups_pages = [{0: [self._admin_group()], 5: []}]
+        self._sync_groups(in_memory_db, monkeypatch, 0)
+        self._sync_groups(in_memory_db, monkeypatch, 5)
+
+        result = self._dryrun_org(in_memory_db, 5)
+        assert result["groups_cache_authoritative"] is True
+        assert result["items"][0]["is_admin"] is True
+
+    def test_a_groups_sync_completing_during_the_count_does_not_certify(self, in_memory_db, root_only, monkeypatch):
+        """F3: the groups marker flips from absent to SUCCESS from inside the
+        count loop (same hook as tests/unit/test_stale_cache_guard.py). The
+        before-read saw None, so the flag must be False. Kills: dropping the
+        `None not in groups_before` check (after-read alone would certify it)."""
+        from ts_admin.services import user_management_service as svc
+
+        real_is_admin = svc._is_admin
+
+        def _groups_sync_lands(session, cluster_id, ts_guid):
+            with Session(in_memory_db) as s:
+                s.add(SyncLog(cluster_id="c1", org_id=0, entity_type="groups", status="SUCCESS", record_count=1))
+                s.commit()
+            return real_is_admin(session, cluster_id, ts_guid)
+
+        monkeypatch.setattr(svc, "_is_admin", _groups_sync_lands)
+        result = svc.preview_delete(cluster_id="c1", user_guids=["u-root"], org_id=0)
+        assert result["groups_cache_authoritative"] is False
 
     def test_groups_flag_never_certified_without_org(self, in_memory_db, seeded):
         from ts_admin.services import user_management_service as svc

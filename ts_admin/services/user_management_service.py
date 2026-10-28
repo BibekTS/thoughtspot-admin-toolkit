@@ -1238,10 +1238,16 @@ def preview_delete(*, cluster_id: str, user_guids: list[str], org_id: int | None
 
     ``groups_cache_authoritative`` is the same before/after identity check over
     the SUCCESS ``groups`` marker: ``is_admin`` is read from the groups cache,
-    and a never-synced (or mid-sync) one makes every ``is_admin`` an unverified
-    False. It covers ``UserGroupMembership`` only — it says nothing about admins
-    who hold ADMINISTRATION without an admin-named group (a live-privileges
-    check, tracked separately). False when ``org_id`` is None.
+    and a cache that was never synced, whose last sync failed or was cancelled,
+    or where a sync completed during the read makes every ``is_admin`` an
+    unverified False. ``_is_admin`` is cluster-wide while each org has its OWN
+    ``Administrator`` group (measured live), so for an org N other than 0 the
+    flag also requires the org-0 (Primary) groups marker to be stable: an org-N
+    sync alone never writes the Primary admin group, and a Primary admin who
+    belongs to org N would read as a certified non-admin. It covers
+    ``UserGroupMembership`` only — it says nothing about admins who hold
+    ADMINISTRATION without an admin-named group (a live-privileges check,
+    tracked separately). False when ``org_id`` is None.
     """
     with Session(_db.get_engine()) as session:
         # Certification is read in THIS session (no second connection on a
@@ -1292,7 +1298,17 @@ def preview_delete(*, cluster_id: str, user_guids: list[str], org_id: int | None
         # production depends on. They pass because that behaviour was measured
         # separately, not because the fixture proves it.
         marker_before = _metadata_marker(session, cluster_id=cluster_id, org_id=org_id)
-        groups_before = _metadata_marker(session, cluster_id=cluster_id, org_id=org_id, entity_type="groups")
+        # Groups scopes that must ALL be certified: the org itself plus org 0
+        # (the Primary org's Administrator group is only written by an org-0
+        # groups sync). `not org_id` = None/0 → just that scope.
+        groups_orgs = (org_id,) if not org_id else (org_id, 0)
+
+        def _groups_markers() -> list:
+            return [
+                _metadata_marker(session, cluster_id=cluster_id, org_id=o, entity_type="groups") for o in groups_orgs
+            ]
+
+        groups_before = _groups_markers()
 
         users = session.exec(
             select(CachedUser).where(
@@ -1325,14 +1341,14 @@ def preview_delete(*, cluster_id: str, user_guids: list[str], org_id: int | None
             )
 
         marker_after = _metadata_marker(session, cluster_id=cluster_id, org_id=org_id)
-        groups_after = _metadata_marker(session, cluster_id=cluster_id, org_id=org_id, entity_type="groups")
+        groups_after = _groups_markers()
 
     return {
         "items": items,
         "total": len(items),
         "unrecognized": unrecognized,
         "metadata_cache_authoritative": marker_before is not None and marker_before == marker_after,
-        "groups_cache_authoritative": groups_before is not None and groups_before == groups_after,
+        "groups_cache_authoritative": None not in groups_before and groups_before == groups_after,
     }
 
 

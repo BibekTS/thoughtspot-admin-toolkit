@@ -183,7 +183,8 @@ class DeletePreviewResponse(BaseModel):
     # from the groups sync.
     metadata_cache_authoritative: bool
     # False ⇒ `is_admin` is read from an uncertified groups cache (never synced,
-    # or a sync overlapped the read). Always False here: no org on this request.
+    # last sync failed or was cancelled, or a sync completed during the read).
+    # Always False here: no org on this request.
     groups_cache_authoritative: bool
 
 
