@@ -1836,6 +1836,41 @@ class TestGroupsCacheAuthoritative:
         assert result["items"][0]["is_admin"] is False
         assert result["groups_cache_authoritative"] is False
 
+    def test_primary_groups_sync_alone_does_not_certify_an_org_n_dryrun(self, in_memory_db, root_in_org5, monkeypatch):
+        """Mirror of the org-N-only test: org 0 synced (Administrator holds the
+        user), org 5 NEVER synced, dry-run in org 5 -> False. Kills: narrowing
+        the scope for org N != 0 to ``(0,)`` only."""
+        _FakeClient.groups_pages = [{0: [self._admin_group()]}]
+        self._sync_groups(in_memory_db, monkeypatch, 0)
+
+        result = self._dryrun_org(in_memory_db, 5)
+        assert result["groups_cache_authoritative"] is False
+
+    def test_a_groups_sync_replacing_an_existing_marker_during_the_count_does_not_certify(
+        self, in_memory_db, root_only, monkeypatch
+    ):
+        """A SUCCESS groups marker exists BEFORE the read; a groups sync then
+        completes inside the count loop and bumps ``synced_at`` (written by the
+        real ``_write_sync_log`` upsert, not a hand-built row). Presence is
+        True at both reads; only the identity comparison sees it. Kills:
+        dropping ``groups_before == groups_after``."""
+        from ts_admin.services import user_management_service as svc
+        from ts_admin.services.sync_service import _write_sync_log
+
+        monkeypatch.setattr("ts_admin.config.ClusterConfig.build_auth_strategy", lambda self, org_id=None: None)
+        _write_sync_log("groups", 0, status="SUCCESS", cluster_id="c1")
+        real_is_admin = svc._is_admin
+
+        def _groups_sync_completes(session, cluster_id, ts_guid):
+            _write_sync_log("groups", 0, status="SUCCESS", cluster_id="c1")
+            return real_is_admin(session, cluster_id, ts_guid)
+
+        # Non-vacuity: without the hook the same call is certified.
+        assert svc.preview_delete(cluster_id="c1", user_guids=["u-root"], org_id=0)["groups_cache_authoritative"]
+        monkeypatch.setattr(svc, "_is_admin", _groups_sync_completes)
+        result = svc.preview_delete(cluster_id="c1", user_guids=["u-root"], org_id=0)
+        assert result["groups_cache_authoritative"] is False
+
     def test_org_n_and_primary_groups_synced_certifies_and_flags_the_admin(
         self, in_memory_db, root_in_org5, monkeypatch
     ):
