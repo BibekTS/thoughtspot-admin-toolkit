@@ -78,7 +78,7 @@ an item reaches `done`, move its index line and detail entry to
 | S28 | P2 | Bare-timestamp watermark cannot express 'not yet crawled' | — |
 | S29 | P2 | _persist_column_map delete-commit crash window | — |
 | S37 | P2 | BearerTokenAuth silently discards org_id | yes (`ts_admin/config.py`) |
-| S46 | P2 | Delete modal implies admin-status is certified when only metadata synced | — |
+| S46 | P2 | Delete modal implies admin-status is certified when only metadata synced (in-progress) | — |
 | S38 | P2 | delete-tag-only is destructive with no dry-run | yes (`tests/integration/test_dryrun_safety.py`) |
 | S42 | P2 | No sync verifies the session org matches the stamped org_id | — |
 | S44 | P2 | A bulk share cannot be verified (bare 204) | — |
@@ -414,7 +414,7 @@ Grid selection is silently lost past ~2,000 rows on the infinite row model. `pag
 
 ### S46 — Delete modal implies admin-status is certified when only metadata synced
 
-`P2` · **open** · protected: no
+`P2` · **in-progress** · protected: no
 
 The delete-user modal renders two cache-derived facts, but S31's completeness
 flag covers only one of them. `metadata_cache_authoritative` is computed from
