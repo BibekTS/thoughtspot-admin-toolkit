@@ -182,6 +182,9 @@ class DeletePreviewResponse(BaseModel):
     # the METADATA sync only — it says nothing about `is_admin`, which comes
     # from the groups sync.
     metadata_cache_authoritative: bool
+    # False ⇒ `is_admin` is read from an uncertified groups cache (never synced,
+    # or a sync overlapped the read). Always False here: no org on this request.
+    groups_cache_authoritative: bool
 
 
 class DeleteDryRunRequest(BaseModel):
@@ -599,6 +602,7 @@ def delete_preview(body: DeletePreviewRequest) -> DeletePreviewResponse:
         total=result["total"],
         unrecognized=result["unrecognized"],
         metadata_cache_authoritative=result["metadata_cache_authoritative"],
+        groups_cache_authoritative=result["groups_cache_authoritative"],
     )
 
 

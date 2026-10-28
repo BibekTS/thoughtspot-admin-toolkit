@@ -432,6 +432,9 @@ export interface DeletePreviewResponse {
   // false ⇒ the owned-object counts above may be incomplete. Metadata sync only —
   // it says nothing about is_admin (groups sync) or anything else.
   metadata_cache_authoritative: boolean;
+  // false ⇒ is_admin is read from an uncertified groups cache (never synced / mid-sync):
+  // a user without an ADMIN badge may still be an admin.
+  groups_cache_authoritative: boolean;
 }
 
 /** Item shape inside a user-delete dry-run job result (adds the live-existence flag). */
@@ -450,6 +453,9 @@ export interface DeleteDryRunResult {
   // false ⇒ the owned-object counts above may be incomplete. Metadata sync only —
   // it says nothing about is_admin (groups sync) or anything else.
   metadata_cache_authoritative: boolean;
+  // false ⇒ is_admin is read from an uncertified groups cache (never synced / mid-sync):
+  // a user without an ADMIN badge may still be an admin.
+  groups_cache_authoritative: boolean;
 }
 
 export interface UserHistoryItem {

@@ -242,6 +242,7 @@ class TestDeletePreviewFlagsRatherThanRefuses:
         )
         assert r.status_code == 200, r.text
         assert r.json()["metadata_cache_authoritative"] is False
+        assert r.json()["groups_cache_authoritative"] is False
 
     def test_dryrun_still_202s_and_creates_a_job(self, client, seeded, in_memory_db, monkeypatch):
         """The flag-not-refuse decision, pinned at the router: an uncertified
