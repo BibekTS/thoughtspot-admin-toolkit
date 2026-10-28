@@ -40,3 +40,12 @@ Entry format:
 - evidence: `pyproject.toml` sections at lines 64-90.
 - proposed change: let a gate_files entry name a TOML table (`pyproject.toml#tool.ruff`) and diff only that table in the edit guard.
 - local workaround: `pyproject.toml` not listed; the review board's regression lens covers gate-config edits there.
+
+## 2026-10-27 Mined find-the-bug cases can leak the answer through the repo's own backlog
+- status: new
+- agent-org version: 0.1.0
+- template: skills/org-eval/SKILL.md (Mine) and skills/org-init/SKILL.md (Phase 6)
+- what happened: a case mined from a real fix used the fix's parent as `base`, but the bug was already filed in `BACKLOG.md` at that commit. The bug-hunter (correctly) skipped it as "already filed", so the case scored discovery it never had to do.
+- evidence: case ts-admin-4, `git show <base>:BACKLOG.md` line 56 names the defect; judge note.
+- proposed change: Mine should grep the base's tracker/memory files for the defect and either reject the case or add a "do not read the backlog/memory" line to the Task (a per-case blind run).
+- local workaround: ts-admin-4 Task now says not to read BACKLOG.md / docs/org-memory/.
