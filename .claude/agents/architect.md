@@ -66,6 +66,8 @@ You cannot spawn agents, so save tokens in how you read and report:
   SSRF, binding, dry-run, audit log).
 - **Verification plan** — the exact gate commands to run (from the verification
   bar) plus the feature-specific check that proves the acceptance criteria.
+- **Decisions to attack** — the non-obvious choices in this plan, stated as claims,
+  so the CEO can hand them to the Review Board.
 
 ## Memory-worthy hand-back
 

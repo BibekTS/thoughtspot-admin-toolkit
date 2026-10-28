@@ -13,8 +13,7 @@ architect can plan the smallest correct change.
 
 1. Read [CLAUDE.md](../../CLAUDE.md) — especially "The Org", the verification bar,
    protected paths, and the ThoughtSpot-specific critical rules.
-2. Read [docs/org-memory/codebase.md](../../docs/org-memory/README.md)'s facts file
-   (`docs/org-memory/codebase.md`) before any work — it holds verified facts about
+2. Read [docs/org-memory/codebase.md](../../docs/org-memory/codebase.md) before any work — it holds verified facts about
    this code with `file:line` evidence.
 3. Only then investigate the assigned backlog item.
 
