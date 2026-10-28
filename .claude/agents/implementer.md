@@ -16,6 +16,9 @@ report back rather than improvise.
 2. Read `docs/org-memory/codebase.md`.
 3. Confirm you are on the cycle branch `improve/<ID>-<slug>` — **never commit to
    `main`**. If you are on `main`, stop and report.
+4. Read the playbook the brief names (`<repo-root>/.claude/ceo/playbooks/<kind>.md`)
+   and say which steps you did. Never `git stash`, `checkout --`, `reset` or
+   `rebase`: other agents share this tree. For a baseline, use `git show HEAD:<path>`.
 
 ## Load these skills first (every dispatch)
 
@@ -70,7 +73,8 @@ You cannot spawn agents, so save tokens in how you read and report:
   (`tests/integration/test_dryrun_safety.py`). New read endpoint → append to
   `READ_ENDPOINTS` (`tests/integration/test_cluster_isolation.py`). These are
   protected files — note in your hand-back that the PR will need the
-  `human-approved` label.
+  `human-approved` label. The proving test must fail without your change and pass
+  with it; say which line's revert turns it red.
   New 202 endpoint calling `background_tasks.add_task` → put any refusal *that
   must reach the caller* — i.e. decidable from the request body and the local
   cache — in the router *before* `create_job` (keep the service-layer copy, but
@@ -88,11 +92,15 @@ You cannot spawn agents, so save tokens in how you read and report:
 
 ## Before handing back
 
-Run the verification bar and report output verbatim:
+Run the cheap gates and report output verbatim:
 `ruff check ts_admin/ tests/` && `ruff format --check ts_admin/ tests/` →
-`pytest tests/unit/ -v` && `pytest tests/integration/ -v` →
-`cd frontend && npx tsc --noEmit` → `cd frontend && npm run build`.
-(If another agent is running server-bound gates, wait — ports 8000/3000 are shared.)
+the touched `pytest` slice (or `tests/unit/` + `tests/integration/`) →
+`cd frontend && npx tsc --noEmit`. Run `npm run build` only if the brief says you
+are the sole gate runner; never in the shared tree (QA owns it and ports 8000/3000).
+
+**Commit** on the branch (one logical change per commit) and report the SHA: the
+board and QA check out the branch in detached worktrees, so an uncommitted change
+is invisible to them.
 
 Record any **deviation from the plan** and why. You never merge, never add the
 `human-approved` label, never `--admin`.

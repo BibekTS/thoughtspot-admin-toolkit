@@ -57,6 +57,9 @@ habit. Delegate to save context; never to skip a gate.
   approved plan to the scratchpad and hand agents the path plus the row ID.
   Lenses read `git diff main...HEAD` themselves; never paste a diff into six
   prompts.
+- **Every brief opens with the repo root as an absolute path** and says: resolve
+  `CLAUDE.md`, `docs/…` and `.claude/...` against it, never against home
+  (`~/.claude/skills/ponytail` exists without this repo's preamble).
 - **Continue, don't respawn.** Fix-loops go back to the same `implementer`
   with `SendMessage`, so it keeps its context. A fresh spawn re-reads the
   whole boot sequence.
@@ -68,7 +71,10 @@ habit. Delegate to save context; never to skip a gate.
   the Review Board (deletes rows, alters purge/retention, adds a correlated
   subquery or join).
 - **Background by default.** Launch agents in the background and do the next
-  independent step (records, PR body draft) while they run.
+  independent step (records, PR body draft) while they run. Draft records and the
+  PR body in the scratchpad only: from the Review ∥ QA dispatch until every lens
+  and QA has reported, nobody commits to the branch, not even markdown (a changed
+  diff is an unverified diff).
 - **Department agents cannot spawn agents.** Their discipline is in their own
   boot sequence: read `codebase.md` by section, `grep`/`sed -n` before whole
   files, hand back conclusions with `file:line`, not file dumps.
@@ -172,6 +178,28 @@ CONFIRMED finding in one row block the others.
 
 ## Phase pipeline (single-item modes)
 
+### 0. PREFLIGHT (every mode)
+1. Kill switch: if `.claude/ceo/PAUSE` exists, stop and report "CEO paused (.claude/ceo/PAUSE present)".
+2. Read `autonomy_level` from `<repo-root>/.claude/ceo/org.json` (lowered by `.claude/ceo/DEMOTED` if
+   present) and refuse what it doesn't unlock (`.claude/ceo/AUTONOMY.md`). Below L3: `N` runs items
+   **sequentially, one PR at a time**, and `discover fix` stops after the filing PR. You never raise
+   the level; on a revert or escaped defect, create `.claude/ceo/DEMOTED` with the lower level and
+   say so first in the report.
+3. Mark the run active: `mkdir -p .claude/ceo/.cache && touch .claude/ceo/.cache/run-active`.
+   Without it the guard's stash / merge / push-to-main blocks don't bind. `rm -f` it on EVERY exit
+   path: SHIP, REJECT, red gate, B2 refusal.
+4. Apply modes need a clean tree (`git status --porcelain`). Dirty → report and stop; never guess
+   whether uncommitted work is safe to touch.
+5. PR backpressure: `gh pr list --state open --search "head:improve/"`. ≥2 open org PRs → open no
+   new one (push to the newest, or records-only). Check each one's `gh pr diff <n> --name-only` so
+   you never rebuild a fix already in review.
+6. Scorecard: update earlier rows' outcome in `.claude/ceo/memory/scorecard.md` (`gh pr list
+   --state all --search "head:improve/"`: landed-clean / landed-edited / closed / reverted). A new
+   revert is a demotion trigger: act now. When the promotion criteria in AUTONOMY.md are met, the
+   report's first line says so; the human grants it.
+7. Run `python3 .claude/ceo/bin/org_doctor.py .`; its errors are org drift you own (the six
+   "never mentioned" warnings are a known doctor false positive, see `.claude/ceo/upstream.md`).
+
 ### 1. PICK
 Read [BACKLOG.md](../../../BACKLOG.md). **Run the B1 reconcile first** - walk every
 `in review` row, close the ones whose PR merged and whose criteria re-verify, return
@@ -179,6 +207,10 @@ the rest to `open` with the unmet criterion named. Then reclaim any dead
 `in-progress` row (branch gone / stale). Pick the target (top open row, or the given `<ID>`). **Re-verify the
 item still applies against current code** — findings go stale. If it's already
 satisfied, skip to a records-only PR marking it `done`.
+Classify the row into one playbook kind (bug fix, perf, feature, refactor, security, upgrade, test
+gap: `.claude/ceo/playbooks/`) and name it in every brief; a two-kind row is two dispatches,
+refactor first. A bug row is **reproduced on current `main`** (a failing test or a live read)
+before design; if it won't reproduce, note it on the row and stop.
 
 ### 2. RESEARCH
 Spawn `researcher` (fallback: the `Explore` agent). For a large item, fan out one
@@ -198,7 +230,8 @@ first in its own row/PR, then re-attempt the behaviour change (the S27 sequencin
 `architect` drafts the plan → **you** check it against the acceptance criteria and
 the "what NOT to touch" list. Then create branch `improve/<ID>-<slug>`, mark the
 row `in-progress` **on the branch**, and dispatch `implementer` to build. For N
-independent items, use worktree-isolated implementers (one each).
+independent items, use worktree-isolated implementers (one each) (L3+ only; below
+L3 run them one after another).
 
 ### 4. REVIEW ∥ QA
 In ONE message, launch the **Review Board** (`reviewer` per lens —
@@ -282,6 +315,8 @@ did not run in this cycle.
   assumptions (S27's own criteria named a mutation that exists only on the
   rejected S7 branch). If that's unavoidable, mark them provisional.
 - Append a one-line micro-retro to `docs/org-memory/retros.md`.
+- Append one row per PR to `.claude/ceo/memory/scorecard.md`: `| date | run | PR | outcome |
+  human edits? | board CONFIRMED | escaped? | cost |`.
 - If the diff left any `ponytail:` marker, name it in the PR body (the shortcut and
   its ceiling). `/ponytail-debt` harvests them repo-wide; a marker whose ceiling is
   now being hit is a finding for `docs/org-memory/findings.md`, not a silent TODO.
@@ -304,7 +339,10 @@ output, review outcome, guard status). **STOP HERE. Do not merge.** Set the row
 ### 8. MICRO-RETRO (mandatory)
 One line: "did any agent/skill/rule mislead or slow this cycle?" Fix it trivially
 in the same PR, or file a process (**M**) backlog row. "No friction" is a valid
-answer.
+answer. An edit to `.claude/agents/*.md` ships with `/org-eval <agent>` in the same
+PR, scores in the body. If the friction would recur in any org built from the
+agent-org templates (a guard false block, an ambiguous template rule), also append
+an entry to `.claude/ceo/upstream.md`; `/org-feedback` sends it, with the human's yes.
 
 ---
 
@@ -350,7 +388,8 @@ implementations passed the entire verification bar and were still wrong.
    "audited X, found clean" facts to `docs/org-memory/codebase.md`, and say
    explicitly in the PR body how many findings were ledgered rather than filed.
 5. Plain `discover` **stops here** (filing only). `discover fix` waits for that PR
-   to merge, pulls `main`, then runs phases 2–8 per finding.
+   to merge, pulls `main`, then runs phases 2–8 per finding (L3+ only; below L3 it
+   stops after the filing PR, like plain `discover`).
 
 ---
 

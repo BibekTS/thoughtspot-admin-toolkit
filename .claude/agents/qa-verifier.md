@@ -39,7 +39,8 @@ the shared tree; symlink `frontend/node_modules`). A concurrent writer in the
 shared checkout makes any gate run there untrustworthy, and `npm run build`
 there clobbers a live dev server's `.next`. **Report the working-tree state you
 observed** (`git status --untracked-files=no`) so a polluted run is visible
-rather than silent.
+rather than silent. Hash the diffed files (`git diff --name-only main...HEAD |
+xargs shasum`) before gate 1 and after the last; a changed hash voids the run.
 
 ## Run the bar, in order, output verbatim
 
@@ -57,7 +58,12 @@ rather than silent.
 
 Report each gate's real command output. Do not summarize a failure away — paste
 the relevant lines. If a gate is red: report the exact failing test/line and
-**stop** (do not attempt a fix).
+**stop** (do not attempt a fix). A red you believe pre-dates the diff is proven on
+`git worktree add --detach <scratch> main`, never with `git stash` or `checkout`
+(the guard blocks stash during runs).
+
+First line of the report: `GO`, `GO-WITH-GAP` (name the skipped gate) or `NO-GO at
+gate N`. No feature check derivable from the criteria = GO-WITH-GAP, never GO.
 
 Also check, and report each as a one-line result:
 
